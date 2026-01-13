@@ -1,4 +1,3 @@
-// models/recycleReport.model.js
 const mongoose = require("mongoose");
 
 const recycleReportSchema = new mongoose.Schema(
@@ -7,39 +6,39 @@ const recycleReportSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Property",
       required: true,
+      index: true,
     },
 
-    binTag: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "BinTag",
+    scanDate: {
+      type: Date,
+      required: true,
+      index: true,
     },
 
-    recycled: {
+    recycle: {
       type: Boolean,
-      default: false,
     },
 
     contaminated: {
       type: Boolean,
-      default: false,
     },
 
     status: {
       type: String,
-      enum: ["Route Checkpoint", "Violation Reported"],
+      enum: ["Violation Reported", "Route Check Point"],
+      index: true,
     },
 
     scannedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
-    },
-
-    scannedAt: {
-      type: Date,
-      default: Date.now,
+      required: true,
     },
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model("RecycleReport", recycleReportSchema);
+module.exports = mongoose.model(
+  "RecycleReport",
+  recycleReportSchema
+);

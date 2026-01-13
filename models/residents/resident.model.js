@@ -1,97 +1,72 @@
-// models/resident.model.js
 const mongoose = require("mongoose");
 
 const residentSchema = new mongoose.Schema(
   {
-    // ======================
-    // Identity
-    // ======================
     firstName: {
       type: String,
       required: true,
       trim: true,
+      index: true,
     },
 
     lastName: {
       type: String,
       required: true,
       trim: true,
+      index: true,
     },
 
-    // ======================
-    // Contact
-    // ======================
     mobile: {
       type: String,
       trim: true,
-      match: /^[0-9\-\+\s()]+$/,
+      index: true,
     },
 
     email: {
       type: String,
-      lowercase: true,
       trim: true,
+      lowercase: true,
+      index: true,
     },
 
-    // ======================
-    // Property Mapping
-    // ======================
     property: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Property",
       required: true,
+      index: true,
     },
 
     building: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Building",
-      default: null,
+      index: true,
     },
 
     unit: {
       type: String,
       required: true,
       trim: true,
+      index: true,
     },
 
-    // ======================
-    // Stats (Derived / Cached)
-    // ======================
     violationCount: {
       type: Number,
       default: 0,
+      index: true,
     },
 
     serviceAlertCount: {
       type: Number,
       default: 0,
+      index: true,
     },
 
-    // ======================
-    // Multi-Tenant
-    // ======================
-    company: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Company",
-      required: true,
-    },
-
-    // ======================
-    // Status
-    // ======================
     isActive: {
       type: Boolean,
       default: true,
+      index: true,
     },
 
-    isDeleted: {
-      type: Boolean,
-      default: false,
-    },
-
-    // ======================
-    // Audit
-    // ======================
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -99,6 +74,14 @@ const residentSchema = new mongoose.Schema(
     },
   },
   { timestamps: true }
+);
+
+/**
+ * Prevent duplicate residents in same property + unit
+ */
+residentSchema.index(
+  { property: 1, unit: 1, email: 1 },
+  { unique: false }
 );
 
 module.exports = mongoose.model("Resident", residentSchema);

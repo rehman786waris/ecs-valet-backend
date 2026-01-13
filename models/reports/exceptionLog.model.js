@@ -1,4 +1,3 @@
-// models/exceptionLog.model.js
 const mongoose = require("mongoose");
 
 const exceptionLogSchema = new mongoose.Schema(
@@ -8,12 +7,16 @@ const exceptionLogSchema = new mongoose.Schema(
       required: true,
     },
 
-    description: String,
+    description: {
+      type: String,
+      required: true,
+    },
 
     exceptionType: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "ExceptionType",
       required: true,
+      index: true,
     },
 
     employee: {
@@ -26,12 +29,14 @@ const exceptionLogSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Property",
       required: true,
+      index: true,
     },
 
     status: {
       type: String,
       enum: ["Open", "Resolved"],
       default: "Open",
+      index: true,
     },
   },
   { timestamps: true }

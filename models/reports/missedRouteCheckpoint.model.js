@@ -1,4 +1,3 @@
-// models/missedRouteCheckpoint.model.js
 const mongoose = require("mongoose");
 
 const missedRouteCheckpointSchema = new mongoose.Schema(
@@ -7,32 +6,24 @@ const missedRouteCheckpointSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Property",
       required: true,
-    },
-
-    building: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Building",
-    },
-
-    binTag: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "BinTag",
-      required: true,
+      index: true,
     },
 
     barcodeId: {
       type: String,
       required: true,
+      index: true,
     },
 
     expectedDate: {
       type: Date,
       required: true,
+      index: true,
     },
 
-    detectedAt: {
-      type: Date,
-      default: Date.now,
+    reason: {
+      type: String,
+      default: "",
     },
   },
   { timestamps: true }

@@ -22,6 +22,8 @@ const serviceNoteActivityRoutes = require("./routes/serviceNoteActivity.routes")
 const serviceNoteTypeRoutes = require("./routes/serviceNoteType.routes");
 const alertRoutes = require("./routes/alert.routes");
 const alertReasonRoutes = require("./routes/alertReason.routes");
+const scheduleRoutes = require("./routes/schedule.routes");
+const residentRoutes = require("./routes/resident.routes");
 
 
 
@@ -52,6 +54,8 @@ app.use("/api/service-note-activities", serviceNoteActivityRoutes);
 app.use("/api/service-note-types", serviceNoteTypeRoutes);
 app.use("/api/alerts", alertRoutes);
 app.use("/api/alert-reasons", alertReasonRoutes);
+app.use("/api/schedules", scheduleRoutes);
+app.use("/api/residents", residentRoutes);
 
 
 

@@ -1,27 +1,34 @@
-// models/taskLog.model.js
 const mongoose = require("mongoose");
 
 const taskLogSchema = new mongoose.Schema(
   {
-    taskName: String,
+    task: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Task",
+      required: true,
+    },
 
     property: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Property",
+      required: true,
+      index: true,
     },
 
-    completedBy: {
+    completedAt: {
+      type: Date,
+      index: true,
+    },
+
+    scannedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
     },
 
-    completionDate: Date,
-
-    media: [
-      {
-        url: String,
-      },
-    ],
+    mediaCount: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );

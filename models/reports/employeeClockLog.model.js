@@ -1,4 +1,3 @@
-// models/employeeClockLog.model.js
 const mongoose = require("mongoose");
 
 const employeeClockLogSchema = new mongoose.Schema(
@@ -7,20 +6,59 @@ const employeeClockLogSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
       required: true,
+      index: true,
     },
 
-    reportingManager: {
+    property: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Employee",
+      ref: "Property",
+      required: true,
+      index: true,
     },
 
-    clockIn: Date,
-    clockOut: Date,
+    barcodeId: {
+      type: String,
+      index: true,
+    },
 
-    reason: String,
+    checkIn: {
+      type: Date,
+      required: true,
+      index: true,
+    },
+
+    checkOut: {
+      type: Date,
+      index: true,
+    },
+
+    durationMinutes: {
+      type: Number,
+    },
+
+    reason: {
+      type: String,
+      trim: true,
+    },
+
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
   },
   { timestamps: true }
 );
+
+// auto-calculate duration
+employeeClockLogSchema.pre("save", function (next) {
+  if (this.checkIn && this.checkOut) {
+    this.durationMinutes = Math.floor(
+      (this.checkOut - this.checkIn) / 60000
+    );
+  }
+  next();
+});
 
 module.exports = mongoose.model(
   "EmployeeClockLog",

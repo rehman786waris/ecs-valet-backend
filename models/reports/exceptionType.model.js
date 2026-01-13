@@ -1,4 +1,3 @@
-// models/exceptionType.model.js
 const mongoose = require("mongoose");
 
 const exceptionTypeSchema = new mongoose.Schema(
@@ -7,10 +6,17 @@ const exceptionTypeSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
+      index: true,
     },
-    category: {
-      type: String,
-      enum: ["Service Issue", "Customer Issue", "Access Denied"],
+
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
     },
   },
   { timestamps: true }
