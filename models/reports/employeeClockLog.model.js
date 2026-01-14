@@ -50,7 +50,7 @@ const employeeClockLogSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// auto-calculate duration
+// Auto-calculate duration
 employeeClockLogSchema.pre("save", function (next) {
   if (this.checkIn && this.checkOut) {
     this.durationMinutes = Math.floor(
@@ -59,6 +59,10 @@ employeeClockLogSchema.pre("save", function (next) {
   }
   next();
 });
+
+// Reporting indexes
+employeeClockLogSchema.index({ checkIn: -1 });
+employeeClockLogSchema.index({ employee: 1, checkIn: -1 });
 
 module.exports = mongoose.model(
   "EmployeeClockLog",

@@ -9,6 +9,11 @@ const recycleReportSchema = new mongoose.Schema(
       index: true,
     },
 
+    propertySnapshot: {
+      address: String,
+      type: String,
+    },
+
     scanDate: {
       type: Date,
       required: true,
@@ -17,15 +22,18 @@ const recycleReportSchema = new mongoose.Schema(
 
     recycle: {
       type: Boolean,
+      default: false,
     },
 
     contaminated: {
       type: Boolean,
+      default: false,
     },
 
     status: {
       type: String,
       enum: ["Violation Reported", "Route Check Point"],
+      required: true,
       index: true,
     },
 
@@ -33,12 +41,13 @@ const recycleReportSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
       required: true,
+      index: true,
     },
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model(
-  "RecycleReport",
-  recycleReportSchema
-);
+recycleReportSchema.index({ property: 1, scanDate: -1 });
+recycleReportSchema.index({ status: 1, scanDate: -1 });
+
+module.exports = mongoose.model("RecycleReport", recycleReportSchema);

@@ -6,12 +6,20 @@ const exceptionTypeSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
+      trim: true,
       index: true,
+    },
+
+    category: {
+      type: String,
+      enum: ["Service Issue", "Customer Issue", "Access Issue", "Other"],
+      default: "Service Issue",
     },
 
     isActive: {
       type: Boolean,
       default: true,
+      index: true,
     },
 
     createdBy: {

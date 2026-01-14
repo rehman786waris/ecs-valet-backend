@@ -6,6 +6,12 @@ const ServiceRoute = require("../models/routes/serviceRoute.model");
 // REPORT MODELS
 const ScanEvent = require("../models/reports/scanEvent.model");
 const Checkpoint = require("../models/reports/checkpoint.model");
+const RecycleReport = require("../models/reports/recycleReport.model");
+const ServiceAlertLog = require("../models/reports/serviceAlertLog.model");
+const TaskLog = require("../models/reports/taskLog.model");
+const EmployeeClockLog = require("../models/reports/employeeClockLog.model");
+
+
 
 /* ===============================
    SERVICE ROUTE SUMMARY
@@ -347,4 +353,478 @@ exports.serviceReport = async (req, res) => {
   }
 };
 
+/* ===============================
+PROPERTY CHECK IN/OUT LOG
+================================ */
 
+exports.propertyCheckInOutLog = async (req, res) => {
+  try {
+    const {
+      startDate,
+      endDate,
+      propertyId,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const skip = (page - 1) * limit;
+
+    const match = {};
+
+    if (startDate && endDate) {
+      match.scannedAt = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    }
+
+    if (propertyId) {
+      match.property = new mongoose.Types.ObjectId(propertyId);
+    }
+
+    const basePipeline = [
+      { $match: match },
+
+      {
+        $group: {
+          _id: {
+            property: "$property",
+            date: {
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$scannedAt",
+              },
+            },
+          },
+          checkIn: { $min: "$scannedAt" },
+          checkOut: { $max: "$scannedAt" },
+        },
+      },
+
+      {
+        $lookup: {
+          from: "properties",
+          localField: "_id.property",
+          foreignField: "_id",
+          as: "property",
+        },
+      },
+      { $unwind: "$property" },
+    ];
+
+    const totalRecords =
+      (
+        await ScanEvent.aggregate([
+          ...basePipeline,
+          { $count: "count" },
+        ])
+      )[0]?.count || 0;
+
+    const data = await ScanEvent.aggregate([
+      ...basePipeline,
+      { $sort: { checkIn: -1 } },
+      { $skip: Number(skip) },
+      { $limit: Number(limit) },
+      {
+        $project: {
+          _id: 0,
+          name: "$property.name",
+          propertyDetail: {
+            address: "$property.address",
+            type: "$property.type",
+          },
+          checkIn: 1,
+          checkOut: 1,
+        },
+      },
+    ]);
+
+    res.json({
+      page: Number(page),
+      limit: Number(limit),
+      totalRecords,
+      totalPages: Math.ceil(totalRecords / limit),
+      data,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/* ===============================
+   SERVICE ALERTS LOG
+================================ */
+exports.serviceAlertsLog = async (req, res) => {
+  try {
+    const {
+      startDate,
+      endDate,
+      status,
+      search,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const skip = (page - 1) * limit;
+
+    const match = { isActive: true };
+
+    if (startDate && endDate) {
+      match.createdAt = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    }
+
+    if (status) match.status = status;
+
+    const pipeline = [
+      { $match: match },
+
+      {
+        $lookup: {
+          from: "employees",
+          localField: "sender",
+          foreignField: "_id",
+          as: "sender",
+        },
+      },
+      { $unwind: "$sender" },
+    ];
+
+    if (search) {
+      pipeline.push({
+        $match: {
+          $or: [
+            { mobile: { $regex: search, $options: "i" } },
+            { "sender.name": { $regex: search, $options: "i" } },
+          ],
+        },
+      });
+    }
+
+    const totalRecords =
+      (
+        await ServiceAlertLog.aggregate([
+          ...pipeline,
+          { $count: "count" },
+        ])
+      )[0]?.count || 0;
+
+    pipeline.push(
+      { $sort: { createdAt: -1 } },
+      { $skip: Number(skip) },
+      { $limit: Number(limit) },
+      {
+        $project: {
+          _id: 0,
+          propertyDetail: "$propertySnapshot",
+          mobile: 1,
+          sender: "$sender.name",
+          status: 1,
+          createdAt: 1,
+        },
+      }
+    );
+
+    const data = await ServiceAlertLog.aggregate(pipeline);
+
+    res.json({
+      page: Number(page),
+      limit: Number(limit),
+      totalRecords,
+      totalPages: Math.ceil(totalRecords / limit),
+      data,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/* ===============================
+   RECYCLE REPORTS
+================================ */
+exports.recycleReports = async (req, res) => {
+  try {
+    const {
+      startDate,
+      endDate,
+      scannedBy,
+      status,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const skip = (page - 1) * limit;
+
+    const match = {};
+
+    if (startDate && endDate) {
+      match.scanDate = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    }
+
+    if (scannedBy) match.scannedBy = scannedBy;
+    if (status) match.status = status;
+
+    /* ===== SUMMARY COUNTS ===== */
+    const [totalRecycle, totalContaminated, totalViolations] =
+      await Promise.all([
+        RecycleReport.countDocuments({ recycle: true }),
+        RecycleReport.countDocuments({ contaminated: true }),
+        RecycleReport.countDocuments({ status: "Violation Reported" }),
+      ]);
+
+    /* ===== DATA LIST ===== */
+    const pipeline = [
+      { $match: match },
+
+      {
+        $lookup: {
+          from: "employees",
+          localField: "scannedBy",
+          foreignField: "_id",
+          as: "scannedBy",
+        },
+      },
+      { $unwind: "$scannedBy" },
+    ];
+
+    const totalRecords =
+      (
+        await RecycleReport.aggregate([
+          ...pipeline,
+          { $count: "count" },
+        ])
+      )[0]?.count || 0;
+
+    pipeline.push(
+      { $sort: { scanDate: -1 } },
+      { $skip: Number(skip) },
+      { $limit: Number(limit) },
+      {
+        $project: {
+          _id: 0,
+          property: "$propertySnapshot",
+          scanDate: 1,
+          recycle: 1,
+          contaminated: 1,
+          status: 1,
+          scanBy: "$scannedBy.name",
+        },
+      }
+    );
+
+    const data = await RecycleReport.aggregate(pipeline);
+
+    res.json({
+      summary: {
+        totalRecycle,
+        totalContaminated,
+        totalViolations,
+      },
+      page: Number(page),
+      limit: Number(limit),
+      totalRecords,
+      totalPages: Math.ceil(totalRecords / limit),
+      data,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+/* ===============================
+   TASK STATUS REPORT
+================================ */
+exports.taskStatusReport = async (req, res) => {
+  try {
+    const {
+      startDate,
+      endDate,
+      propertyId,
+      scannedBy,
+      hasMedia,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const skip = (page - 1) * limit;
+    const match = {};
+
+    if (propertyId) match.property = propertyId;
+    if (scannedBy) match.scannedBy = scannedBy;
+
+    if (startDate && endDate) {
+      match.completedAt = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    }
+
+    if (hasMedia === "true") match.mediaCount = { $gt: 0 };
+    if (hasMedia === "false") match.mediaCount = 0;
+
+    const pipeline = [
+      { $match: match },
+
+      {
+        $lookup: {
+          from: "tasks",
+          localField: "task",
+          foreignField: "_id",
+          as: "task",
+        },
+      },
+      { $unwind: { path: "$task", preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          from: "employees",
+          localField: "scannedBy",
+          foreignField: "_id",
+          as: "scannedBy",
+        },
+      },
+      { $unwind: { path: "$scannedBy", preserveNullAndEmptyArrays: true } },
+    ];
+
+    const totalRecords =
+      (
+        await TaskLog.aggregate([
+          ...pipeline,
+          { $count: "count" },
+        ])
+      )[0]?.count || 0;
+
+    pipeline.push(
+      { $sort: { completedAt: -1 } },
+      { $skip: Number(skip) },
+      { $limit: Number(limit) },
+      {
+        $project: {
+          _id: 0,
+          task: "$task.title",
+          property: "$propertySnapshot.address",
+          completionDate: "$completedAt",
+          scanBy: "$scannedBy.name",
+          media: "$mediaCount",
+        },
+      }
+    );
+
+    const data = await TaskLog.aggregate(pipeline);
+
+    res.json({
+      page: Number(page),
+      limit: Number(limit),
+      totalRecords,
+      totalPages: Math.ceil(totalRecords / limit),
+      data,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+/* ===============================
+   EMPLOYEE CLOCK IN / OUT LOG
+================================ */
+exports.employeeClockInOutLog = async (req, res) => {
+  try {
+    const {
+      startDate,
+      endDate,
+      employeeId,
+      reportingManager,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const skip = (page - 1) * limit;
+    const match = {};
+
+    if (employeeId) match.employee = employeeId;
+
+    if (startDate && endDate) {
+      match.checkIn = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    }
+
+    const pipeline = [
+      { $match: match },
+
+      {
+        $lookup: {
+          from: "employees",
+          localField: "employee",
+          foreignField: "_id",
+          as: "employee",
+        },
+      },
+      { $unwind: "$employee" },
+
+      {
+        $lookup: {
+          from: "employees",
+          localField: "employee.reportingManager",
+          foreignField: "_id",
+          as: "reportingManager",
+        },
+      },
+      {
+        $unwind: {
+          path: "$reportingManager",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+    ];
+
+    if (reportingManager) {
+      pipeline.push({
+        $match: { "reportingManager._id": reportingManager },
+      });
+    }
+
+    const totalRecords =
+      (
+        await EmployeeClockLog.aggregate([
+          ...pipeline,
+          { $count: "count" },
+        ])
+      )[0]?.count || 0;
+
+    pipeline.push(
+      { $sort: { checkIn: -1 } },
+      { $skip: Number(skip) },
+      { $limit: Number(limit) },
+      {
+        $project: {
+          _id: 0,
+          reportingManager: "$reportingManager.name",
+          clockIn: "$checkIn",
+          clockOut: "$checkOut",
+          reason: { $ifNull: ["$reason", "-"] },
+        },
+      }
+    );
+
+    const data = await EmployeeClockLog.aggregate(pipeline);
+
+    res.json({
+      page: Number(page),
+      limit: Number(limit),
+      totalRecords,
+      totalPages: Math.ceil(totalRecords / limit),
+      data,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};

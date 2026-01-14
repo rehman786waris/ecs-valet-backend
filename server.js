@@ -25,6 +25,9 @@ const alertReasonRoutes = require("./appRoutes/alertReason.routes");
 const scheduleRoutes = require("./appRoutes/schedule.routes");
 const residentRoutes = require("./appRoutes/resident.routes");
 const serviceRouteSummaryRoutes = require("./appRoutes/reports.routes");
+const exceptionTypeRoutes = require("./appRoutes/exceptionType.routes");
+const exceptionLogRoutes = require("./appRoutes/exceptionLog.routes");
+
 
 
 
@@ -58,6 +61,10 @@ app.use("/api/alert-reasons", alertReasonRoutes);
 app.use("/api/schedules", scheduleRoutes);
 app.use("/api/residents", residentRoutes);
 app.use("/api/reports", serviceRouteSummaryRoutes);
+app.use("/api/exceptions", exceptionTypeRoutes);
+app.use("/api/exceptions", exceptionLogRoutes);
+
+
 
 app.get("/", (req, res) => {
   res.send("Server running with dotenv!");

@@ -15,6 +15,10 @@ const taskLogSchema = new mongoose.Schema(
       index: true,
     },
 
+    propertySnapshot: {
+      address: String,
+    },
+
     completedAt: {
       type: Date,
       index: true,
@@ -32,5 +36,8 @@ const taskLogSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+taskLogSchema.index({ property: 1, completedAt: -1 });
+taskLogSchema.index({ scannedBy: 1 });
 
 module.exports = mongoose.model("TaskLog", taskLogSchema);

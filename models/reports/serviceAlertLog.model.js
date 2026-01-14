@@ -1,12 +1,7 @@
 const mongoose = require("mongoose");
 
-const serviceRouteSummarySchema = new mongoose.Schema(
+const serviceAlertLogSchema = new mongoose.Schema(
   {
-    name: {
-      type: String,
-      required: true,
-    },
-
     property: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Property",
@@ -14,26 +9,45 @@ const serviceRouteSummarySchema = new mongoose.Schema(
       index: true,
     },
 
-    barcodeId: {
+    propertySnapshot: {
+      address: String,
+      type: String,
+    },
+
+    mobile: {
       type: String,
       required: true,
       index: true,
     },
 
-    totalCheckpoints: {
-      type: Number,
-      default: 0,
+    sender: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      required: true,
+      index: true,
     },
 
-    scannedCheckpoints: {
-      type: Number,
-      default: 0,
+    message: {
+      type: String,
+      default: "",
+    },
+
+    status: {
+      type: String,
+      enum: ["New", "Submitted", "Closed"],
+      default: "New",
+      index: true,
+    },
+
+    isActive: {
+      type: Boolean,
+      default: true,
     },
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model(
-  "ServiceRouteSummary",
-  serviceRouteSummarySchema
-);
+serviceAlertLogSchema.index({ createdAt: -1 });
+serviceAlertLogSchema.index({ property: 1, createdAt: -1 });
+
+module.exports = mongoose.model("ServiceAlertLog", serviceAlertLogSchema);
