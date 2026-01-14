@@ -5,25 +5,26 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const { connectToMongo } = require("./config/db");
 
-const userRoutes = require("./routes/userRoutes");
-const propertyManagerRoutes = require("./routes/propertyManagerRoutes");
-const employeesRoutes = require("./routes/employeesRoutes");
-const violationRoutes = require("./routes/violation.routes");
-const violationRuleRoutes = require("./routes/violationRule.routes");
-const violationActionRoutes = require("./routes/violationAction.routes");
-const violationTemplateRoutes = require("./routes/violationTemplate.routes");
-const propertyRoutes = require("./routes/property.routes");
-const binTagRoutes = require("./routes/binTag.routes");
-const qrScanLogRoutes = require("./routes/qrScanLog.routes");
-const customerRoutes = require("./routes/customer.routes");
-const taskRoutes = require("./routes/task.routes");
-const serviceNoteRoutes = require("./routes/serviceNote.routes");
-const serviceNoteActivityRoutes = require("./routes/serviceNoteActivity.routes");
-const serviceNoteTypeRoutes = require("./routes/serviceNoteType.routes");
-const alertRoutes = require("./routes/alert.routes");
-const alertReasonRoutes = require("./routes/alertReason.routes");
-const scheduleRoutes = require("./routes/schedule.routes");
-const residentRoutes = require("./routes/resident.routes");
+const userRoutes = require("./appRoutes/userRoutes");
+const propertyManagerRoutes = require("./appRoutes/propertyManagerRoutes");
+const employeesRoutes = require("./appRoutes/employeesRoutes");
+const violationRoutes = require("./appRoutes/violation.routes");
+const violationRuleRoutes = require("./appRoutes/violationRule.routes");
+const violationActionRoutes = require("./appRoutes/violationAction.routes");
+const violationTemplateRoutes = require("./appRoutes/violationTemplate.routes");
+const propertyRoutes = require("./appRoutes/property.routes");
+const binTagRoutes = require("./appRoutes/binTag.routes");
+const qrScanLogRoutes = require("./appRoutes/qrScanLog.routes");
+const customerRoutes = require("./appRoutes/customer.routes");
+const taskRoutes = require("./appRoutes/task.routes");
+const serviceNoteRoutes = require("./appRoutes/serviceNote.routes");
+const serviceNoteActivityRoutes = require("./appRoutes/serviceNoteActivity.routes");
+const serviceNoteTypeRoutes = require("./appRoutes/serviceNoteType.routes");
+const alertRoutes = require("./appRoutes/alert.routes");
+const alertReasonRoutes = require("./appRoutes/alertReason.routes");
+const scheduleRoutes = require("./appRoutes/schedule.routes");
+const residentRoutes = require("./appRoutes/resident.routes");
+const serviceRouteSummaryRoutes = require("./appRoutes/reports.routes");
 
 
 
@@ -56,8 +57,7 @@ app.use("/api/alerts", alertRoutes);
 app.use("/api/alert-reasons", alertReasonRoutes);
 app.use("/api/schedules", scheduleRoutes);
 app.use("/api/residents", residentRoutes);
-
-
+app.use("/api/reports", serviceRouteSummaryRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server running with dotenv!");
