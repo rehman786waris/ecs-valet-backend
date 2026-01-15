@@ -27,6 +27,10 @@ const residentRoutes = require("./appRoutes/resident.routes");
 const serviceRouteSummaryRoutes = require("./appRoutes/reports.routes");
 const exceptionTypeRoutes = require("./appRoutes/exceptionType.routes");
 const exceptionLogRoutes = require("./appRoutes/exceptionLog.routes");
+const roleRoutes = require("./appRoutes/role.routes");
+const clockLogRoutes = require("./appRoutes/employeeClockLog.routes");
+
+
 
 
 
@@ -63,6 +67,10 @@ app.use("/api/residents", residentRoutes);
 app.use("/api/reports", serviceRouteSummaryRoutes);
 app.use("/api/exceptions", exceptionTypeRoutes);
 app.use("/api/exceptions", exceptionLogRoutes);
+app.use("/api/roles", roleRoutes);
+app.use("/api/clock-logs", clockLogRoutes);
+
+
 
 
 

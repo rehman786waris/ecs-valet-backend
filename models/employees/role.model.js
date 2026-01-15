@@ -1,4 +1,3 @@
-// models/role.model.js
 const mongoose = require("mongoose");
 
 const roleSchema = new mongoose.Schema(
@@ -7,24 +6,40 @@ const roleSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+    },
+
+    slug: {
+      type: String,
+      required: true,
+      lowercase: true,
       unique: true,
     },
 
     description: {
       type: String,
       trim: true,
+      maxlength: 300,
     },
 
     permissions: {
-      customers: { type: Boolean, default: false },
-      employees: { type: Boolean, default: false },
-      properties: { type: Boolean, default: false },
-      barcodes: { type: Boolean, default: false },
-      reports: { type: Boolean, default: false },
-      manageViolations: { type: Boolean, default: false },
-      manageTasks: { type: Boolean, default: false },
-      manageNotes: { type: Boolean, default: false },
-      manageResidents: { type: Boolean, default: false },
+      type: [String],
+      enum: [
+        "customers",
+        "employees",
+        "properties",
+        "barcodes",
+        "reports",
+        "manage_violations",
+        "manage_tasks",
+        "manage_notes",
+        "manage_residents",
+      ],
+      default: [],
+    },
+
+    isSystemRole: {
+      type: Boolean,
+      default: false,
     },
 
     isActive: {
@@ -34,10 +49,13 @@ const roleSchema = new mongoose.Schema(
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Employee",
+      ref: "User",
+    },
+
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
     },
   },
   { timestamps: true }
 );
-
-module.exports = mongoose.model("Role", roleSchema);

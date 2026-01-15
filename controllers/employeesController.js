@@ -1,7 +1,7 @@
 const Employee = require("../models/employees/employee.model");
 const { generateToken, generateRefreshToken } = require("../utils/generateToken");
 
-/* ================= CREATE EMPLOYEE ================= */
+/* ================= CREATE EMPLOYEE (ADMIN) ================= */
 exports.createEmployee = async (req, res) => {
   try {
     const { password, ...data } = req.body;
@@ -23,7 +23,7 @@ exports.createEmployee = async (req, res) => {
       ...data,
       email: data.email.toLowerCase(),
       passwordHash: password,
-      createdBy: req.user.id,
+      createdBy: req.user.id, // Admin ID
     });
 
     await employee.save();
@@ -65,7 +65,7 @@ exports.loginEmployee = async (req, res) => {
 
     const payload = {
       id: employee._id,
-      role: "EMPLOYEE",
+      type: "EMPLOYEE",
       tokenVersion: employee.tokenVersion,
     };
 
@@ -79,12 +79,11 @@ exports.loginEmployee = async (req, res) => {
   }
 };
 
-/* =====================================================
-   GET ALL EMPLOYEES (ADMIN)
-===================================================== */
+/* ================= GET ALL EMPLOYEES (ADMIN) ================= */
 exports.getEmployees = async (req, res) => {
   const employees = await Employee.find({ isDeleted: false })
     .populate("property", "name")
+    .populate("role", "displayName")
     .populate("reportingManager", "firstName lastName")
     .select("-passwordHash")
     .sort({ createdAt: -1 });
@@ -92,15 +91,14 @@ exports.getEmployees = async (req, res) => {
   res.json(employees);
 };
 
-/* =====================================================
-   GET SINGLE EMPLOYEE
-===================================================== */
+/* ================= GET SINGLE EMPLOYEE ================= */
 exports.getEmployeeById = async (req, res) => {
   const employee = await Employee.findOne({
     _id: req.params.id,
     isDeleted: false,
   })
     .populate("property")
+    .populate("role")
     .populate("reportingManager")
     .select("-passwordHash");
 
@@ -111,9 +109,7 @@ exports.getEmployeeById = async (req, res) => {
   res.json(employee);
 };
 
-/* =====================================================
-   UPDATE EMPLOYEE
-===================================================== */
+/* ================= UPDATE EMPLOYEE ================= */
 exports.updateEmployee = async (req, res) => {
   const employee = await Employee.findOne({
     _id: req.params.id,
@@ -126,20 +122,16 @@ exports.updateEmployee = async (req, res) => {
 
   Object.assign(employee, req.body);
 
-  // 🔐 Hash password safely
   if (req.body.password) {
     employee.passwordHash = req.body.password;
   }
 
-  await employee.save(); // ✅ pre-save runs
+  await employee.save();
 
-  res.json({ message: "Employee updated", employee });
+  res.json({ message: "Employee updated successfully", employee });
 };
 
-
-/* =====================================================
-   ENABLE / DISABLE EMPLOYEE
-===================================================== */
+/* ================= ENABLE / DISABLE EMPLOYEE ================= */
 exports.toggleEmployeeStatus = async (req, res) => {
   const employee = await Employee.findById(req.params.id);
 
@@ -156,13 +148,15 @@ exports.toggleEmployeeStatus = async (req, res) => {
   });
 };
 
-/* =====================================================
-   SOFT DELETE EMPLOYEE
-===================================================== */
+/* ================= SOFT DELETE EMPLOYEE ================= */
 exports.deleteEmployee = async (req, res) => {
   const employee = await Employee.findByIdAndUpdate(
     req.params.id,
-    { isDeleted: true, isActive: false, tokenVersion: 999 },
+    {
+      isDeleted: true,
+      isActive: false,
+      tokenVersion: 999,
+    },
     { new: true }
   );
 
