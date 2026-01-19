@@ -95,10 +95,9 @@ const employeeSchema = new mongoose.Schema(
 );
 
 /* 🔐 HASH PASSWORD */
-employeeSchema.pre("save", async function (next) {
-  if (!this.isModified("passwordHash")) return next();
+employeeSchema.pre("save", async function () {
+  if (!this.isModified("passwordHash")) return;
   this.passwordHash = await bcrypt.hash(this.passwordHash, 10);
-  next();
 });
 
 /* 🔐 COMPARE PASSWORD */
@@ -107,15 +106,16 @@ employeeSchema.methods.comparePassword = function (password) {
 };
 
 /* ❌ PREVENT SELF MANAGER */
-employeeSchema.pre("save", function (next) {
+employeeSchema.pre("save", function () {
   if (
     this.reportingManager &&
+    this._id &&
     this.reportingManager.equals(this._id)
   ) {
-    return next(new Error("Employee cannot be their own reporting manager"));
+    throw new Error("Employee cannot be their own reporting manager");
   }
-  next();
 });
+
 
 /* INDEXES */
 employeeSchema.index({ email: 1, isDeleted: 1 });

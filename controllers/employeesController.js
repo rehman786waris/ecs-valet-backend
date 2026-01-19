@@ -1,13 +1,36 @@
 const Employee = require("../models/employees/employee.model");
 const { generateToken, generateRefreshToken } = require("../utils/generateToken");
 
+/* ================= PICK EMPLOYEE (SAFE RESPONSE) ================= */
+const pickEmployee = (employee) => {
+  if (!employee) return null;
+
+  return {
+    id: employee._id,
+    firstName: employee.firstName,
+    lastName: employee.lastName,
+    email: employee.email,
+    phone: employee.phone,
+    role: employee.role,
+    property: employee.property,
+    reportingManager: employee.reportingManager,
+    isActive: employee.isActive,
+    lastLogin: employee.lastLogin,
+    createdAt: employee.createdAt,
+    updatedAt: employee.updatedAt,
+  };
+};
+
 /* ================= CREATE EMPLOYEE (ADMIN) ================= */
 exports.createEmployee = async (req, res) => {
   try {
     const { password, ...data } = req.body;
 
     if (!password) {
-      return res.status(400).json({ message: "Password is required" });
+      return res.status(400).json({
+        success: false,
+        message: "Password is required",
+      });
     }
 
     const exists = await Employee.findOne({
@@ -16,27 +39,31 @@ exports.createEmployee = async (req, res) => {
     });
 
     if (exists) {
-      return res.status(409).json({ message: "Email already exists" });
+      return res.status(409).json({
+        success: false,
+        message: "Email already exists",
+      });
     }
 
     const employee = new Employee({
       ...data,
       email: data.email.toLowerCase(),
-      passwordHash: password,
-      createdBy: req.user.id, // Admin ID
+      passwordHash: password, // hashed via schema middleware
+      createdBy: req.user.id,
     });
 
     await employee.save();
 
     res.status(201).json({
+      success: true,
       message: "Employee created successfully",
-      employee: {
-        id: employee._id,
-        email: employee.email,
-      },
+      data: pickEmployee(employee),
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
@@ -52,12 +79,18 @@ exports.loginEmployee = async (req, res) => {
     }).select("+passwordHash");
 
     if (!employee) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
     }
 
     const isMatch = await employee.comparePassword(password);
     if (!isMatch) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
     }
 
     employee.lastLogin = new Date();
@@ -70,12 +103,19 @@ exports.loginEmployee = async (req, res) => {
     };
 
     res.json({
+      success: true,
       message: "Login successful",
-      accessToken: generateToken(payload),
-      refreshToken: generateRefreshToken(payload),
+      data: {
+        employee: pickEmployee(employee),
+        accessToken: generateToken(payload),
+        refreshToken: generateRefreshToken(payload),
+      },
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
@@ -88,7 +128,10 @@ exports.getEmployees = async (req, res) => {
     .select("-passwordHash")
     .sort({ createdAt: -1 });
 
-  res.json(employees);
+  res.json({
+    success: true,
+    data: employees.map(pickEmployee),
+  });
 };
 
 /* ================= GET SINGLE EMPLOYEE ================= */
@@ -103,10 +146,16 @@ exports.getEmployeeById = async (req, res) => {
     .select("-passwordHash");
 
   if (!employee) {
-    return res.status(404).json({ message: "Employee not found" });
+    return res.status(404).json({
+      success: false,
+      message: "Employee not found",
+    });
   }
 
-  res.json(employee);
+  res.json({
+    success: true,
+    data: pickEmployee(employee),
+  });
 };
 
 /* ================= UPDATE EMPLOYEE ================= */
@@ -117,7 +166,10 @@ exports.updateEmployee = async (req, res) => {
   }).select("+passwordHash");
 
   if (!employee) {
-    return res.status(404).json({ message: "Employee not found" });
+    return res.status(404).json({
+      success: false,
+      message: "Employee not found",
+    });
   }
 
   Object.assign(employee, req.body);
@@ -128,7 +180,11 @@ exports.updateEmployee = async (req, res) => {
 
   await employee.save();
 
-  res.json({ message: "Employee updated successfully", employee });
+  res.json({
+    success: true,
+    message: "Employee updated successfully",
+    data: pickEmployee(employee),
+  });
 };
 
 /* ================= ENABLE / DISABLE EMPLOYEE ================= */
@@ -136,7 +192,10 @@ exports.toggleEmployeeStatus = async (req, res) => {
   const employee = await Employee.findById(req.params.id);
 
   if (!employee || employee.isDeleted) {
-    return res.status(404).json({ message: "Employee not found" });
+    return res.status(404).json({
+      success: false,
+      message: "Employee not found",
+    });
   }
 
   employee.isActive = !employee.isActive;
@@ -144,6 +203,7 @@ exports.toggleEmployeeStatus = async (req, res) => {
   await employee.save();
 
   res.json({
+    success: true,
     message: `Employee ${employee.isActive ? "enabled" : "disabled"} successfully`,
   });
 };
@@ -161,8 +221,14 @@ exports.deleteEmployee = async (req, res) => {
   );
 
   if (!employee) {
-    return res.status(404).json({ message: "Employee not found" });
+    return res.status(404).json({
+      success: false,
+      message: "Employee not found",
+    });
   }
 
-  res.json({ message: "Employee deleted successfully" });
+  res.json({
+    success: true,
+    message: "Employee deleted successfully",
+  });
 };
