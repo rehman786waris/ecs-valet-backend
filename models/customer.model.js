@@ -46,7 +46,7 @@ const customerSchema = new mongoose.Schema(
 
     propertyManager: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "PropertyManager",
       index: true,
     },
 

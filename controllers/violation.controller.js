@@ -16,7 +16,6 @@ exports.createViolation = async (req, res) => {
       notes,
       source = "Manual",
       binTagId,
-      images = [],
     } = req.body;
 
     if (!property || !user || !rule) {
@@ -31,6 +30,12 @@ exports.createViolation = async (req, res) => {
       });
     }
 
+    // ✅ Map uploaded images
+    const images = (req.files || []).map(file => ({
+      url: file.location,
+      key: file.key,
+    }));
+
     const violation = await Violation.create({
       company: req.user.company,
       property,
@@ -43,7 +48,7 @@ exports.createViolation = async (req, res) => {
       notes,
       source,
       binTagId,
-      images: images.filter(img => img.url),
+      images,
       createdBy: req.user._id,
       submittedFromMobile: source === "Scan",
     });
@@ -173,7 +178,6 @@ exports.updateViolation = async (req, res) => {
       "building",
       "floor",
       "notes",
-      "images",
     ];
 
     allowedFields.forEach((field) => {
@@ -181,6 +185,14 @@ exports.updateViolation = async (req, res) => {
         violation[field] = req.body[field];
       }
     });
+
+    // ✅ If new images uploaded → replace old images
+    if (req.files && req.files.length > 0) {
+      violation.images = req.files.map((file) => ({
+        url: file.location,
+        key: file.key,
+      }));
+    }
 
     await violation.save();
 

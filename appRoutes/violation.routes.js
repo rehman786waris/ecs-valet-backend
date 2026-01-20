@@ -3,27 +3,18 @@ const router = express.Router();
 
 const violationController = require("../controllers/violation.controller");
 const adminAuth = require("../middlewares/adminAuthMiddleware");
+const uploadViolationImages = require("../middlewares/uploadViolationImages");
 
 /* =====================================================
    VIOLATION ROUTES
 ===================================================== */
 
-// Create violation (Manual / Scan - Mobile)
-router.post("/", adminAuth, violationController.createViolation);
-
-// Get all violations (Admin dashboard)
+// Create violation with images
+router.post("/", adminAuth, uploadViolationImages.array("images", 5), violationController.createViolation);
+router.put("/:id", adminAuth, uploadViolationImages.array("images", 5), violationController.updateViolation);
 router.get("/", adminAuth, violationController.getViolations);
-
-// Get single violation by ID
 router.get("/:id", adminAuth, violationController.getViolationById);
-
-// Update violation details
-router.put("/:id", adminAuth, violationController.updateViolation);
-
-// Update violation status only
 router.patch("/:id/status", adminAuth, violationController.updateViolationStatus);
-
-// Soft delete violation
 router.delete("/:id", adminAuth, violationController.deleteViolation);
 
 module.exports = router;

@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
+const uploadPropertyImages = require("../middlewares/uploadPropertyImages");
 const propertyController = require("../controllers/property.controller");
 const adminAuth = require("../middlewares/adminAuthMiddleware");
 
@@ -9,7 +10,7 @@ const adminAuth = require("../middlewares/adminAuthMiddleware");
 ===================================================== */
 
 // Create property
-router.post("/", adminAuth, propertyController.createProperty);
+router.post("/", adminAuth, uploadPropertyImages.array("images", 10), propertyController.createProperty);
 
 // Get all properties
 router.get("/", adminAuth, propertyController.getProperties);
@@ -18,7 +19,7 @@ router.get("/", adminAuth, propertyController.getProperties);
 router.get("/:id", adminAuth, propertyController.getPropertyById);
 
 // Update property
-router.put("/:id", adminAuth, propertyController.updateProperty);
+router.put("/:id", adminAuth, uploadPropertyImages.array("images", 10), propertyController.updateProperty);
 
 // Toggle active/inactive
 router.patch("/:id/status", adminAuth, propertyController.togglePropertyStatus);

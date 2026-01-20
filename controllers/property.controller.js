@@ -7,10 +7,21 @@ exports.createProperty = async (req, res) => {
   try {
     const data = req.body;
 
-    if (!data.customer || !data.propertyName || !data.propertyType) {
-      return res.status(400).json({
-        message: "Customer, Property Name, and Property Type are required",
-      });
+    if (data.redundantRouteService !== undefined) {
+      data.redundantRouteService =
+        data.redundantRouteService === true ||
+        data.redundantRouteService === "true";
+    }
+
+    // Attach images to buildings
+    if (req.files?.length && data.buildings) {
+      const buildings = JSON.parse(data.buildings);
+
+      buildings[0].images = req.files.map(
+        (file) => file.location
+      );
+
+      data.buildings = buildings;
     }
 
     const property = await Property.create({
@@ -27,6 +38,7 @@ exports.createProperty = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 /* =====================================================
    GET ALL PROPERTIES (WITH FILTERS)
@@ -120,6 +132,15 @@ exports.updateProperty = async (req, res) => {
       return res.status(404).json({ message: "Property not found" });
     }
 
+    if (req.files?.length && req.body.buildings) {
+      const buildings = JSON.parse(req.body.buildings);
+      buildings[0].images = [
+        ...(buildings[0].images || []),
+        ...req.files.map((file) => file.location),
+      ];
+      property.buildings = buildings;
+    }
+
     const allowedFields = [
       "customer",
       "propertyManager",
@@ -129,7 +150,6 @@ exports.updateProperty = async (req, res) => {
       "addressType",
       "address",
       "radiusMiles",
-      "buildings",
       "serviceAgreement",
       "serviceAlertSMS",
       "isActive",
@@ -151,6 +171,7 @@ exports.updateProperty = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 /* =====================================================
    TOGGLE PROPERTY STATUS
