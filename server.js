@@ -18,7 +18,7 @@ const qrScanLogRoutes = require("./appRoutes/qrScanLog.routes");
 const customerRoutes = require("./appRoutes/customer.routes");
 const taskRoutes = require("./appRoutes/task.routes");
 const serviceNoteRoutes = require("./appRoutes/serviceNote.routes");
-const serviceNoteActivityRoutes = require("./appRoutes/serviceNoteActivity.routes");
+const serviceNoteStatusRoutes = require("./appRoutes/serviceNoteStatus.routes");
 const serviceNoteTypeRoutes = require("./appRoutes/serviceNoteType.routes");
 const alertRoutes = require("./appRoutes/alert.routes");
 const alertReasonRoutes = require("./appRoutes/alertReason.routes");
@@ -29,6 +29,8 @@ const exceptionTypeRoutes = require("./appRoutes/exceptionType.routes");
 const exceptionLogRoutes = require("./appRoutes/exceptionLog.routes");
 const roleRoutes = require("./appRoutes/role.routes");
 const clockLogRoutes = require("./appRoutes/employeeClockLog.routes");
+const noteSubjectRoutes = require("./appRoutes/noteSubject.routes");
+
 
 
 
@@ -58,7 +60,7 @@ app.use("/api/qr-scan-logs", qrScanLogRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/service-notes", serviceNoteRoutes);
-app.use("/api/service-note-activities", serviceNoteActivityRoutes);
+app.use("/api/service-note-statuses", serviceNoteStatusRoutes);
 app.use("/api/service-note-types", serviceNoteTypeRoutes);
 app.use("/api/alerts", alertRoutes);
 app.use("/api/alert-reasons", alertReasonRoutes);
@@ -69,10 +71,7 @@ app.use("/api/exceptions", exceptionTypeRoutes);
 app.use("/api/exceptions", exceptionLogRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/clock-logs", clockLogRoutes);
-
-
-
-
+app.use("/api/note-subjects", noteSubjectRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server running with dotenv!");

@@ -13,6 +13,7 @@ const roleSchema = new mongoose.Schema(
       required: true,
       lowercase: true,
       unique: true,
+      index: true,
     },
 
     description: {
@@ -27,12 +28,12 @@ const roleSchema = new mongoose.Schema(
         "customers",
         "employees",
         "properties",
+        "manage_residents",
         "barcodes",
         "reports",
-        "manage_violations",
         "manage_tasks",
+        "manage_violations",
         "manage_notes",
-        "manage_residents",
       ],
       default: [],
     },
@@ -59,3 +60,5 @@ const roleSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+module.exports = mongoose.model("Role", roleSchema);

@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const serviceNoteTypeSchema = new mongoose.Schema(
+const noteSubjectSchema = new mongoose.Schema(
   {
     name: {
       type: String,
@@ -18,11 +18,6 @@ const serviceNoteTypeSchema = new mongoose.Schema(
       index: true,
     },
 
-    description: {
-      type: String,
-      default: "",
-    },
-
     isSystem: {
       type: Boolean,
       default: false,
@@ -38,6 +33,7 @@ const serviceNoteTypeSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
     },
 
     updatedBy: {
@@ -48,14 +44,4 @@ const serviceNoteTypeSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-/* ================= HELPERS ================= */
-serviceNoteTypeSchema.pre("validate", async function () {
-  if (!this.slug && this.name) {
-    this.slug = this.name
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, "_");
-  }
-});
-
-module.exports = mongoose.model("ServiceNoteType", serviceNoteTypeSchema);
+module.exports = mongoose.model("NoteSubject", noteSubjectSchema);

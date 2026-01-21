@@ -1,18 +1,35 @@
 const ServiceNote = require("../models/service/serviceNote.model");
-const ServiceNoteActivity = require("../models/service/serviceNoteActivity.model");
+const ServiceNoteStatus = require("../models/service/serviceNoteStatus.model");
 
 /* =====================================================
-   CREATE SERVICE NOTE
+   CREATE SERVICE NOTE (WITH IMAGES)
 ===================================================== */
 exports.createServiceNote = async (req, res) => {
   try {
-    const note = await ServiceNote.create(req.body);
+    // 🔹 Default status must exist
+    const defaultStatus = await ServiceNoteStatus.findOne({
+      code: "NEW",
+      isActive: true,
+    });
 
-    // Create activity log
-    await ServiceNoteActivity.create({
-      serviceNote: note._id,
-      status: "New",
-      changedBy: req.body.createdBy,
+    if (!defaultStatus) {
+      return res.status(400).json({
+        message: "Default status (NEW) is not configured",
+      });
+    }
+
+    const images =
+      req.files?.map((file) => ({
+        url: file.location,
+        uploadedBy: req.user._id,
+        uploadedAt: new Date(),
+      })) || [];
+
+    const note = await ServiceNote.create({
+      ...req.body,
+      status: defaultStatus._id,
+      images,
+      createdBy: req.user._id,
     });
 
     return res.status(201).json({
@@ -28,14 +45,16 @@ exports.createServiceNote = async (req, res) => {
 };
 
 /* =====================================================
-   GET ALL SERVICE NOTES (Filters + Pagination)
+   GET ALL SERVICE NOTES
 ===================================================== */
+const mongoose = require("mongoose");
+
 exports.getServiceNotes = async (req, res) => {
   try {
     const {
       page = 1,
       limit = 10,
-      search = "",
+      search,
       status,
       noteType,
       property,
@@ -43,21 +62,39 @@ exports.getServiceNotes = async (req, res) => {
 
     const query = { isActive: true };
 
-    if (status) query.status = status;
+    // 🔹 STATUS FILTER (CODE or ObjectId)
+    if (status) {
+      if (mongoose.Types.ObjectId.isValid(status)) {
+        query.status = status;
+      } else {
+        const statusDoc = await ServiceNoteStatus.findOne({
+          code: status.toUpperCase(),
+          isActive: true,
+        });
+
+        if (!statusDoc) {
+          return res.status(400).json({
+            message: "Invalid status filter",
+          });
+        }
+
+        query.status = statusDoc._id;
+      }
+    }
+
     if (noteType) query.noteType = noteType;
     if (property) query.property = property;
 
     if (search) {
-      query.$or = [
-        { subject: { $regex: search, $options: "i" } },
-        { unitNumber: { $regex: search, $options: "i" } },
-      ];
+      query.$or = [{ unitNumber: { $regex: search, $options: "i" } }];
     }
 
     const notes = await ServiceNote.find(query)
       .populate("user", "name")
       .populate("property", "name")
+      .populate("subject", "name")
       .populate("noteType", "name")
+      .populate("status", "name code")
       .populate("createdBy", "name")
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
@@ -79,6 +116,7 @@ exports.getServiceNotes = async (req, res) => {
   }
 };
 
+
 /* =====================================================
    GET SERVICE NOTE BY ID
 ===================================================== */
@@ -87,11 +125,15 @@ exports.getServiceNoteById = async (req, res) => {
     const note = await ServiceNote.findById(req.params.id)
       .populate("user", "name")
       .populate("property", "name")
+      .populate("subject", "name")
       .populate("noteType", "name")
+      .populate("status", "name code")
       .populate("createdBy", "name");
 
     if (!note) {
-      return res.status(404).json({ message: "Service note not found" });
+      return res.status(404).json({
+        message: "Service note not found",
+      });
     }
 
     return res.status(200).json(note);
@@ -104,35 +146,48 @@ exports.getServiceNoteById = async (req, res) => {
 };
 
 /* =====================================================
-   UPDATE SERVICE NOTE (Status, Description, etc.)
+   UPDATE SERVICE NOTE (WITH IMAGES & STATUS)
 ===================================================== */
 exports.updateServiceNote = async (req, res) => {
   try {
     const note = await ServiceNote.findById(req.params.id);
-
     if (!note) {
-      return res.status(404).json({ message: "Service note not found" });
+      return res.status(404).json({
+        message: "Service note not found",
+      });
     }
 
-    const prevStatus = note.status;
+    const previousStatus = note.status?.toString();
 
     Object.assign(note, req.body);
 
-    // Auto set readAt
-    if (req.body.status === "Read" && prevStatus !== "Read") {
-      note.readAt = new Date();
+    // 🔹 Append images
+    if (req.files?.length) {
+      const images = req.files.map((file) => ({
+        url: file.location,
+        uploadedBy: req.user._id,
+        uploadedAt: new Date(),
+      }));
+      note.images.push(...images);
+    }
+
+    // 🔹 Handle status change
+    if (req.body.status && req.body.status !== previousStatus) {
+      const statusObj = await ServiceNoteStatus.findById(req.body.status);
+
+      if (!statusObj || !statusObj.isActive) {
+        return res.status(400).json({
+          message: "Invalid or inactive status",
+        });
+      }
+
+      // 📌 READ logic
+      if (statusObj.code === "READ") {
+        note.readAt = new Date();
+      }
     }
 
     await note.save();
-
-    // Log activity if status changed
-    if (req.body.status && req.body.status !== prevStatus) {
-      await ServiceNoteActivity.create({
-        serviceNote: note._id,
-        status: req.body.status,
-        changedBy: req.body.updatedBy || note.createdBy,
-      });
-    }
 
     return res.status(200).json({
       message: "Service note updated successfully",
@@ -154,15 +209,18 @@ exports.toggleServiceNoteStatus = async (req, res) => {
     const note = await ServiceNote.findById(req.params.id);
 
     if (!note) {
-      return res.status(404).json({ message: "Service note not found" });
+      return res.status(404).json({
+        message: "Service note not found",
+      });
     }
 
     note.isActive = !note.isActive;
     await note.save();
 
     return res.status(200).json({
-      message: `Service note ${note.isActive ? "enabled" : "disabled"} successfully`,
-      data: note,
+      message: `Service note ${
+        note.isActive ? "enabled" : "disabled"
+      } successfully`,
     });
   } catch (error) {
     return res.status(500).json({
@@ -173,7 +231,7 @@ exports.toggleServiceNoteStatus = async (req, res) => {
 };
 
 /* =====================================================
-   DELETE SERVICE NOTE (SOFT DELETE)
+   SOFT DELETE SERVICE NOTE
 ===================================================== */
 exports.deleteServiceNote = async (req, res) => {
   try {
@@ -184,7 +242,9 @@ exports.deleteServiceNote = async (req, res) => {
     );
 
     if (!note) {
-      return res.status(404).json({ message: "Service note not found" });
+      return res.status(404).json({
+        message: "Service note not found",
+      });
     }
 
     return res.status(200).json({

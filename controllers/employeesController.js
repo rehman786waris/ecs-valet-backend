@@ -1,4 +1,8 @@
 const Employee = require("../models/employees/employee.model");
+const Role = require("../models/employees/role.model");
+const mongoose = require("mongoose");
+
+
 const { generateToken, generateRefreshToken } = require("../utils/generateToken");
 
 /* ================= PICK EMPLOYEE (SAFE RESPONSE) ================= */
@@ -172,6 +176,46 @@ exports.updateEmployee = async (req, res) => {
     });
   }
 
+  /* ✅ FIX ROLE HANDLING */
+  if (req.body.role) {
+    // CASE 1: ObjectId provided (correct frontend behavior)
+    if (mongoose.Types.ObjectId.isValid(req.body.role)) {
+      const roleExists = await Role.exists({
+        _id: req.body.role,
+        isActive: true,
+      });
+
+      if (!roleExists) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid role",
+        });
+      }
+
+      req.body.role = roleExists._id || req.body.role;
+    }
+    // CASE 2: Role name / slug provided
+    else if (typeof req.body.role === "string") {
+      const roleDoc = await Role.findOne({
+        $or: [
+          { slug: req.body.role.toLowerCase() },
+          { displayName: req.body.role },
+        ],
+        isActive: true,
+      });
+
+      if (!roleDoc) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid role",
+        });
+      }
+
+      req.body.role = roleDoc._id;
+    }
+  }
+
+  /* APPLY UPDATES */
   Object.assign(employee, req.body);
 
   if (req.body.password) {

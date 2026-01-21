@@ -12,6 +12,7 @@ const serviceNoteSchema = new mongoose.Schema(
     property: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Property",
+      required: true,
       index: true,
     },
 
@@ -22,9 +23,9 @@ const serviceNoteSchema = new mongoose.Schema(
     },
 
     subject: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "NoteSubject",
       required: true,
-      trim: true,
       index: true,
     },
 
@@ -37,7 +38,8 @@ const serviceNoteSchema = new mongoose.Schema(
 
     description: {
       type: String,
-      default: "",
+      trim: true,
+      maxlength: 2000,
     },
 
     images: [
@@ -45,7 +47,15 @@ const serviceNoteSchema = new mongoose.Schema(
         url: {
           type: String,
           required: true,
+          trim: true,
         },
+
+        uploadedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+
         uploadedAt: {
           type: Date,
           default: Date.now,
@@ -54,14 +64,15 @@ const serviceNoteSchema = new mongoose.Schema(
     ],
 
     status: {
-      type: String,
-      enum: ["New", "Read", "Closed"],
-      default: "New",
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceNoteStatus",
+      required: true,
       index: true,
     },
 
     readAt: {
       type: Date,
+      default: null,
     },
 
     isActive: {
@@ -77,7 +88,14 @@ const serviceNoteSchema = new mongoose.Schema(
       index: true,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    versionKey: false,
+  }
 );
+
+serviceNoteSchema.index({ property: 1, status: 1 });
+serviceNoteSchema.index({ subject: 1, noteType: 1 });
+serviceNoteSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model("ServiceNote", serviceNoteSchema);

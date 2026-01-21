@@ -1,5 +1,22 @@
 const Role = require("../models/employees/role.model");
 
+/* 🔁 NORMALIZE PERMISSIONS */
+const normalizePermissions = (permissions = []) => {
+  const map = {
+    "Customers": "customers",
+    "Employees": "employees",
+    "Properties": "properties",
+    "Manage Residents": "manage_residents",
+    "Barcodes": "barcodes",
+    "Report": "reports",
+    "Manage Tasks": "manage_tasks",
+    "Manage Violation": "manage_violations",
+    "Manage Notes": "manage_notes",
+  };
+
+  return permissions.map(p => map[p] || p.toLowerCase());
+};
+
 /* ================= CREATE ROLE (ADMIN) ================= */
 exports.createRole = async (req, res) => {
   try {
@@ -23,9 +40,9 @@ exports.createRole = async (req, res) => {
       displayName,
       slug,
       description,
-      permissions,
-      isSystemRole: isSystemRole || false,
-      createdBy: req.user.id, // Admin (User)
+      permissions: normalizePermissions(permissions),
+      isSystemRole: !!isSystemRole,
+      createdBy: req.user.id,
     });
 
     await role.save();
@@ -70,6 +87,10 @@ exports.updateRole = async (req, res) => {
     return res.status(403).json({
       message: "System roles cannot be modified",
     });
+  }
+
+  if (req.body.permissions) {
+    req.body.permissions = normalizePermissions(req.body.permissions);
   }
 
   Object.assign(role, req.body);
