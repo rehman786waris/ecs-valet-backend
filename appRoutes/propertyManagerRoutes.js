@@ -3,6 +3,7 @@ const router = express.Router();
 
 const propertyManager = require("../controllers/propertyManagerController");
 const adminAuth = require("../middlewares/adminAuthMiddleware");
+const uploadPropertyManagerAvatar = require("../middlewares/uploadPropertyManagerAvatarS3");
 
 // ---------------- PUBLIC ----------------
 router.post("/login", propertyManager.propertyManagerLogin);
@@ -14,6 +15,15 @@ router.put("/:id/disable", adminAuth, propertyManager.disablePropertyManager);
 router.delete("/:id", adminAuth, propertyManager.deletePropertyManager);
 router.get("/", adminAuth, propertyManager.getPropertyManagers);
 router.get("/:id", adminAuth, propertyManager.getPropertyManager);
-router.put("/:id", adminAuth, propertyManager.updatePropertyManager);
+
+/* ======================
+   UPDATE PROPERTY MANAGER + AVATAR
+====================== */
+router.put(
+  "/:id",
+  adminAuth,
+  uploadPropertyManagerAvatar.single("avatar"), // 👈 image field
+  propertyManager.updatePropertyManager // ✅ FIXED
+);
 
 module.exports = router;

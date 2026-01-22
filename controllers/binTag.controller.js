@@ -1,19 +1,13 @@
 const BinTag = require("../models/properties/binTag.model");
 const Property = require("../models/properties/property.model");
+const generateAndUploadQRCode = require("../utils/generateAndUploadQRCode");
 
 /* =====================================================
-   CREATE BIN TAG
+   CREATE BIN TAG (WITH QR UPLOAD)
 ===================================================== */
 exports.createBinTag = async (req, res) => {
   try {
-    const {
-      property,
-      unitNumber,
-      barcode,
-      type,
-      building,
-      qrCodeImage,
-    } = req.body;
+    const { property, unitNumber, barcode, type, building } = req.body;
 
     if (!property || !unitNumber || !barcode || !type) {
       return res.status(400).json({
@@ -21,7 +15,7 @@ exports.createBinTag = async (req, res) => {
       });
     }
 
-    // Fetch property snapshot
+    // Validate property
     const propertyDoc = await Property.findOne({
       _id: property,
       company: req.user.company,
@@ -31,6 +25,9 @@ exports.createBinTag = async (req, res) => {
     if (!propertyDoc) {
       return res.status(404).json({ message: "Property not found" });
     }
+
+    // 🔥 Generate QR Code
+    const qrCodeImage = await generateAndUploadQRCode(barcode);
 
     const binTag = await BinTag.create({
       company: req.user.company,
@@ -52,23 +49,17 @@ exports.createBinTag = async (req, res) => {
       data: binTag,
     });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: error.message });
   }
 };
 
 /* =====================================================
-   GET ALL BIN TAGS (FILTERS + PAGINATION)
+   GET ALL BIN TAGS
 ===================================================== */
 exports.getBinTags = async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 10,
-      property,
-      status,
-      type,
-      search,
-    } = req.query;
+    const { page = 1, limit = 10, property, status, type, search } = req.query;
 
     const query = {
       company: req.user.company,
@@ -95,11 +86,7 @@ exports.getBinTags = async (req, res) => {
 
     res.json({
       data,
-      pagination: {
-        total,
-        page: Number(page),
-        limit: Number(limit),
-      },
+      pagination: { total, page: Number(page), limit: Number(limit) },
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -142,13 +129,7 @@ exports.updateBinTag = async (req, res) => {
       return res.status(404).json({ message: "Bin tag not found" });
     }
 
-    const allowedFields = [
-      "unitNumber",
-      "status",
-      "type",
-      "building",
-      "qrCodeImage",
-    ];
+    const allowedFields = ["unitNumber", "status", "type", "building"];
 
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) {

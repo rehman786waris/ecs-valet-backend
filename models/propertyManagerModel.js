@@ -35,6 +35,17 @@ const propertyManagerSchema = new mongoose.Schema(
       default: "PROPERTY_MANAGER",
     },
 
+    profileImage: {
+      url: { type: String, trim: true },
+      key: { type: String, trim: true },
+      provider: {
+        type: String,
+        enum: ["s3", "cloudinary", "local"],
+        default: "s3",
+      },
+      uploadedAt: { type: Date, default: Date.now },
+    },
+
     tokenVersion: {
       type: Number,
       default: 0,

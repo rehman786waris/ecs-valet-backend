@@ -145,17 +145,49 @@ exports.getPropertyManager = async (req, res) => {
    UPDATE (ADMIN)
 ===================================================== */
 exports.updatePropertyManager = async (req, res) => {
-  const manager = await PropertyManager.findOneAndUpdate(
-    { _id: req.params.id, isDeleted: false },
-    req.body,
-    { new: true }
-  ).select("-passwordHash");
+  try {
+    req.body = req.body || {}; // ✅ IMPORTANT for multipart
 
-  if (!manager)
-    return res.status(404).json({ message: "Property Manager not found" });
+    const manager = await PropertyManager.findOne({
+      _id: req.params.id,
+      isDeleted: false,
+    }).select("-passwordHash");
 
-  res.json(manager);
+    if (!manager) {
+      return res.status(404).json({ message: "Property Manager not found" });
+    }
+
+    /* ======================
+       AVATAR UPDATE (S3)
+    ====================== */
+    if (req.file) {
+      manager.profileImage = {
+        url: req.file.location, // S3 URL
+        key: req.file.key,      // S3 object key
+        provider: "s3",
+        uploadedAt: new Date(),
+      };
+    }
+
+    /* ======================
+       OTHER UPDATES
+    ====================== */
+    const blockedFields = ["passwordHash", "profileImage"];
+    blockedFields.forEach((f) => delete req.body[f]);
+
+    Object.assign(manager, req.body);
+
+    await manager.save();
+
+    res.json({
+      message: "Property Manager updated successfully",
+      data: manager,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 };
+
 
 /* =====================================================
    SOFT DELETE (ADMIN)

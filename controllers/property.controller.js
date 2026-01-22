@@ -1,14 +1,22 @@
 const Property = require("../models/properties/property.model");
 const Building = require("../models/buildings.model");
+const BinTag = require("../models/properties/binTag.model");
+
+const generateAndUploadQRCode = require("../utils/generateAndUploadQRCode");
 
 /* =====================================================
-   HELPER: PARSE BOOLEAN
+   HELPERS
 ===================================================== */
-const parseBoolean = (value) =>
-  value === true || value === "true" || value === "on";
+const parseBoolean = (v) => v === true || v === "true" || v === "on";
+
+const generateUnitNumber = (bIndex, uIndex) =>
+  `B${bIndex + 1}-U${uIndex + 1}`;
+
+const generateBarcode = (propertyId, bIndex, uIndex) =>
+  `BIN-${propertyId.toString().slice(-4)}-${bIndex + 1}-${uIndex + 1}`;
 
 /* =====================================================
-   CREATE PROPERTY
+   CREATE PROPERTY (BUILDINGS + BINTAGS + QR)
 ===================================================== */
 exports.createProperty = async (req, res) => {
   try {
@@ -22,7 +30,7 @@ exports.createProperty = async (req, res) => {
       ? JSON.parse(data.buildings)
       : [];
 
-    // Create property
+    // 1️⃣ Property
     const property = await Property.create({
       ...data,
       company: req.user.company,
@@ -32,13 +40,12 @@ exports.createProperty = async (req, res) => {
 
     const files = req.files || [];
     let fileIndex = 0;
+    const buildingIds = [];
 
-    const createdBuildings = [];
-
+    // 2️⃣ Buildings + BinTags
     for (let i = 0; i < buildingsPayload.length; i++) {
       const b = buildingsPayload[i];
 
-      // Assign files sequentially per building
       const images = [];
       const imageCount = Number(b.imageCount || 0);
 
@@ -58,19 +65,53 @@ exports.createProperty = async (req, res) => {
         images,
       });
 
-      createdBuildings.push(building._id);
+      buildingIds.push(building._id);
+
+      const binTags = [];
+
+      for (let u = 0; u < b.numberOfUnits; u++) {
+        const barcode = generateBarcode(property._id, i, u);
+        const qrCodeImage = await generateAndUploadQRCode(barcode);
+
+        binTags.push({
+          company: req.user.company,
+          property: property._id,
+          propertySnapshot: {
+            propertyName: property.propertyName,
+            address: `${property.address.street}, ${property.address.city}`,
+          },
+          building: {
+            name: building.name,
+            order: building.buildingOrder,
+            address: building.address,
+          },
+          unitNumber: generateUnitNumber(i, u),
+          barcode,
+          qrCodeImage,
+          type: "Bin",
+          createdBy: req.user._id,
+        });
+      }
+
+      if (binTags.length) {
+        await BinTag.insertMany(binTags);
+      }
     }
 
-    property.buildings = createdBuildings;
+    property.buildings = buildingIds;
     await property.save();
 
     res.status(201).json({
       success: true,
-      message: "Property created successfully",
+      message: "Property, Buildings, BinTags & QR Codes created successfully",
       data: property,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("CREATE PROPERTY ERROR:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -80,14 +121,8 @@ exports.createProperty = async (req, res) => {
 ===================================================== */
 exports.getProperties = async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 10,
-      search,
-      isActive,
-      customer,
-      propertyManager,
-    } = req.query;
+    const { page = 1, limit = 10, search, isActive, customer, propertyManager } =
+      req.query;
 
     const query = {
       company: req.user.company,
@@ -106,13 +141,10 @@ exports.getProperties = async (req, res) => {
       ];
     }
 
-    const properties = await Property.find(query)
+    const data = await Property.find(query)
       .populate("customer", "name")
       .populate("propertyManager", "firstName lastName")
-      .populate({
-        path: "buildings",
-        select: "name numberOfUnits buildingOrder images isActive",
-      })
+      .populate("buildings")
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit));
@@ -121,12 +153,8 @@ exports.getProperties = async (req, res) => {
 
     res.json({
       success: true,
-      data: properties,
-      pagination: {
-        total,
-        page: Number(page),
-        limit: Number(limit),
-      },
+      data,
+      pagination: { total, page: Number(page), limit: Number(limit) },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -145,13 +173,13 @@ exports.getPropertyById = async (req, res) => {
     })
       .populate("customer")
       .populate("propertyManager")
-      .populate("createdBy", "firstName lastName")
       .populate("buildings");
 
     if (!property) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Property not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Property not found",
+      });
     }
 
     res.json({ success: true, data: property });
@@ -161,12 +189,10 @@ exports.getPropertyById = async (req, res) => {
 };
 
 /* =====================================================
-   UPDATE PROPERTY (PROPERTY ONLY)
+   UPDATE PROPERTY (NO REGEN)
 ===================================================== */
 exports.updateProperty = async (req, res) => {
   try {
-    const data = req.body;
-
     const property = await Property.findOne({
       _id: req.params.id,
       company: req.user.company,
@@ -174,24 +200,19 @@ exports.updateProperty = async (req, res) => {
     });
 
     if (!property) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Property not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Property not found",
+      });
     }
 
-    /* ======================
-       BOOLEAN FIX
-    ====================== */
-    if (data.redundantRouteService !== undefined) {
+    if (req.body.redundantRouteService !== undefined) {
       property.redundantRouteService = parseBoolean(
-        data.redundantRouteService
+        req.body.redundantRouteService
       );
     }
 
-    /* ======================
-       UPDATE PROPERTY FIELDS
-    ====================== */
-    const allowedFields = [
+    const fields = [
       "customer",
       "propertyManager",
       "propertyName",
@@ -204,60 +225,20 @@ exports.updateProperty = async (req, res) => {
       "isActive",
     ];
 
-    allowedFields.forEach((field) => {
-      if (data[field] !== undefined) {
-        property[field] = data[field];
-      }
+    fields.forEach((f) => {
+      if (req.body[f] !== undefined) property[f] = req.body[f];
     });
 
-    /* ======================
-       UPDATE BUILDING IMAGES
-    ====================== */
-    if (data.buildings && req.files?.length) {
-      const buildingsPayload = JSON.parse(data.buildings);
-      const files = req.files;
-      let fileIndex = 0;
-
-      for (let i = 0; i < buildingsPayload.length; i++) {
-        const b = buildingsPayload[i];
-
-        if (!b._id || !b.imageCount) continue;
-
-        const building = await Building.findOne({
-          _id: b._id,
-          property: property._id,
-        });
-
-        if (!building) continue;
-
-        for (let j = 0; j < b.imageCount; j++) {
-          if (files[fileIndex]) {
-            building.images.push({
-              url: files[fileIndex].location,
-            });
-            fileIndex++;
-          }
-        }
-
-        // 🔥 THIS updates building.updatedAt
-        await building.save();
-      }
-    }
-
-    // 🔥 THIS updates property.updatedAt
     await property.save();
 
-    res.json({
-      success: true,
-      message: "Property updated successfully",
-    });
+    res.json({ success: true, message: "Property updated successfully" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 /* =====================================================
-   TOGGLE PROPERTY STATUS
+   TOGGLE STATUS
 ===================================================== */
 exports.togglePropertyStatus = async (req, res) => {
   try {
@@ -268,26 +249,23 @@ exports.togglePropertyStatus = async (req, res) => {
     });
 
     if (!property) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Property not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Property not found",
+      });
     }
 
     property.isActive = !property.isActive;
     await property.save();
 
-    res.json({
-      success: true,
-      message: "Property status updated",
-      data: property,
-    });
+    res.json({ success: true, message: "Property status updated" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 /* =====================================================
-   SOFT DELETE PROPERTY
+   SOFT DELETE
 ===================================================== */
 exports.deleteProperty = async (req, res) => {
   try {
@@ -298,18 +276,16 @@ exports.deleteProperty = async (req, res) => {
     });
 
     if (!property) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Property not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Property not found",
+      });
     }
 
     property.isDeleted = true;
     await property.save();
 
-    res.json({
-      success: true,
-      message: "Property deleted successfully",
-    });
+    res.json({ success: true, message: "Property deleted successfully" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

@@ -128,25 +128,46 @@ exports.getUser = async (req, res) => {
 ===================================================== */
 exports.updateUser = async (req, res) => {
   try {
-    const user = await User.findOneAndUpdate(
-      {
-        _id: req.params.id,
-        company: req.user.company,
-        isDeleted: false,
-      },
-      req.body,
-      { new: true }
-    ).select("-passwordHash");
+    const user = await User.findOne({
+      _id: req.params.id,
+      company: req.user.company,
+      isDeleted: false,
+    }).select("-passwordHash");
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    res.json({ message: "User updated", user });
+    /* ======================
+       AVATAR UPDATE (S3)
+    ====================== */
+    if (req.file) {
+      user.profileImage = {
+        url: req.file.location, // S3 public URL
+        key: req.file.key,      // S3 object key
+        provider: "s3",
+        uploadedAt: new Date(),
+      };
+    }
+
+    /* ======================
+       OTHER UPDATES
+    ====================== */
+    const blockedFields = ["passwordHash", "company", "profileImage"];
+    blockedFields.forEach((f) => delete req.body[f]);
+
+    Object.assign(user, req.body);
+    await user.save();
+
+    res.json({
+      message: "User updated successfully",
+      user,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 /* =====================================================
    SOFT DELETE USER

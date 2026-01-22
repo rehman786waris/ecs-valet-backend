@@ -44,6 +44,17 @@ const employeeSchema = new mongoose.Schema(
       ref: "Property",
     },
 
+    profileImage: {
+      url: { type: String, trim: true },
+      key: { type: String, trim: true },
+      provider: {
+        type: String,
+        enum: ["s3", "cloudinary", "local"],
+        default: "s3",
+      },
+      uploadedAt: { type: Date, default: Date.now },
+    },
+
     reportingManager: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",

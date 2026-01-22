@@ -15,6 +15,7 @@ const pickEmployee = (employee) => {
     lastName: employee.lastName,
     email: employee.email,
     phone: employee.phone,
+    profileImage: employee.profileImage || null,
     role: employee.role,
     property: employee.property,
     reportingManager: employee.reportingManager,
@@ -164,72 +165,98 @@ exports.getEmployeeById = async (req, res) => {
 
 /* ================= UPDATE EMPLOYEE ================= */
 exports.updateEmployee = async (req, res) => {
-  const employee = await Employee.findOne({
-    _id: req.params.id,
-    isDeleted: false,
-  }).select("+passwordHash");
+  try {
+    req.body = req.body || {}; // ✅ FIX
 
-  if (!employee) {
-    return res.status(404).json({
+    const employee = await Employee.findOne({
+      _id: req.params.id,
+      isDeleted: false,
+    }).select("+passwordHash");
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    /* ======================
+       ROLE HANDLING (SAFE)
+    ====================== */
+    if (req.body.role) {
+      if (mongoose.Types.ObjectId.isValid(req.body.role)) {
+        const roleExists = await Role.exists({
+          _id: req.body.role,
+          isActive: true,
+        });
+
+        if (!roleExists) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid role",
+          });
+        }
+
+        req.body.role = roleExists._id;
+      } else {
+        const roleDoc = await Role.findOne({
+          $or: [
+            { slug: req.body.role.toLowerCase() },
+            { displayName: req.body.role },
+          ],
+          isActive: true,
+        });
+
+        if (!roleDoc) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid role",
+          });
+        }
+
+        req.body.role = roleDoc._id;
+      }
+    }
+
+    /* ======================
+       PROFILE IMAGE UPDATE
+    ====================== */
+    if (req.file) {
+      employee.profileImage = {
+        url: req.file.location,
+        key: req.file.key,
+        provider: "s3",
+        uploadedAt: new Date(),
+      };
+    }
+
+    /* ======================
+       APPLY OTHER UPDATES
+    ====================== */
+    const blockedFields = ["passwordHash", "profileImage"];
+    blockedFields.forEach((f) => delete req.body[f]);
+
+    Object.assign(employee, req.body);
+
+    if (req.body.password) {
+      employee.passwordHash = req.body.password;
+    }
+
+    await employee.save();
+
+    res.json({
+      success: true,
+      message: "Employee updated successfully",
+      data: pickEmployee(employee),
+    });
+  } catch (err) {
+    res.status(500).json({
       success: false,
-      message: "Employee not found",
+      message: err.message,
     });
   }
-
-  /* ✅ FIX ROLE HANDLING */
-  if (req.body.role) {
-    // CASE 1: ObjectId provided (correct frontend behavior)
-    if (mongoose.Types.ObjectId.isValid(req.body.role)) {
-      const roleExists = await Role.exists({
-        _id: req.body.role,
-        isActive: true,
-      });
-
-      if (!roleExists) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid role",
-        });
-      }
-
-      req.body.role = roleExists._id || req.body.role;
-    }
-    // CASE 2: Role name / slug provided
-    else if (typeof req.body.role === "string") {
-      const roleDoc = await Role.findOne({
-        $or: [
-          { slug: req.body.role.toLowerCase() },
-          { displayName: req.body.role },
-        ],
-        isActive: true,
-      });
-
-      if (!roleDoc) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid role",
-        });
-      }
-
-      req.body.role = roleDoc._id;
-    }
-  }
-
-  /* APPLY UPDATES */
-  Object.assign(employee, req.body);
-
-  if (req.body.password) {
-    employee.passwordHash = req.body.password;
-  }
-
-  await employee.save();
-
-  res.json({
-    success: true,
-    message: "Employee updated successfully",
-    data: pickEmployee(employee),
-  });
 };
+
 
 /* ================= ENABLE / DISABLE EMPLOYEE ================= */
 exports.toggleEmployeeStatus = async (req, res) => {
