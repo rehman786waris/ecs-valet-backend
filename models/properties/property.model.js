@@ -1,44 +1,7 @@
-// models/property.model.js
 const mongoose = require("mongoose");
 
-/* ======================
-   BUILDING SUB-SCHEMA
-====================== */
-const buildingSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      trim: true,
-      required: true,
-    },
-    totalUnits: {
-      type: Number,
-      default: 0,
-    },
-    buildingOrder: {
-      type: Number,
-      default: 0,
-    },
-    address: {
-      type: String,
-      trim: true,
-    },
-    images: {
-      type: [String],
-      default: [],
-    },
-  },
-  { _id: false }
-);
-
-/* ======================
-   PROPERTY SCHEMA
-====================== */
 const propertySchema = new mongoose.Schema(
   {
-    /* ======================
-       MULTI TENANT
-    ====================== */
     company: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",
@@ -46,9 +9,6 @@ const propertySchema = new mongoose.Schema(
       index: true,
     },
 
-    /* ======================
-       CUSTOMER & MANAGER
-    ====================== */
     customer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
@@ -66,12 +26,8 @@ const propertySchema = new mongoose.Schema(
     redundantRouteService: {
       type: Boolean,
       default: false,
-      index: true,
     },
 
-    /* ======================
-       BASIC INFO
-    ====================== */
     propertyName: {
       type: String,
       required: true,
@@ -92,29 +48,25 @@ const propertySchema = new mongoose.Schema(
     },
 
     address: {
-      street: { type: String, trim: true },
-      city: { type: String, trim: true },
-      state: { type: String, trim: true },
-      zip: { type: String, trim: true },
+      street: String,
+      city: String,
+      state: String,
+      zip: String,
     },
 
     radiusMiles: {
       type: Number,
-      min: 0,
       default: 0,
     },
 
-    /* ======================
-       BUILDINGS
-    ====================== */
-    buildings: {
-      type: [buildingSchema],
-      default: [],
-    },
+    /* ✅ REFERENCED BUILDINGS */
+    buildings: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Building",
+      },
+    ],
 
-    /* ======================
-       SERVICE AGREEMENT
-    ====================== */
     serviceAgreement: {
       pickupStartDate: Date,
 
@@ -133,36 +85,16 @@ const propertySchema = new mongoose.Schema(
         enum: ["Waste", "Recycle", "Both"],
       },
 
-      binSizeWaste: {
-        type: Number, // gallons
-      },
-
-      binSizeRecycle: {
-        type: Number, // gallons
-      },
-
-      wasteReductionTarget: {
-        type: Number, // %
-      },
+      binSizeWaste: Number,
+      binSizeRecycle: Number,
+      wasteReductionTarget: Number,
     },
 
-    /* ======================
-       SERVICE ALERT SMS
-    ====================== */
     serviceAlertSMS: {
-      propertyCheckin: {
-        type: String,
-        trim: true,
-      },
-      propertyCheckout: {
-        type: String,
-        trim: true,
-      },
+      propertyCheckin: String,
+      propertyCheckout: String,
     },
 
-    /* ======================
-       STATUS & AUDIT
-    ====================== */
     isActive: {
       type: Boolean,
       default: true,
@@ -183,12 +115,5 @@ const propertySchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
-/* ======================
-   INDEXES
-====================== */
-propertySchema.index({ company: 1, isDeleted: 1 });
-propertySchema.index({ company: 1, propertyName: 1 });
-propertySchema.index({ company: 1, propertyManager: 1 });
 
 module.exports = mongoose.model("Property", propertySchema);

@@ -11,23 +11,25 @@ const buildingSchema = new mongoose.Schema(
 
     name: {
       type: String,
-      required: true, // e.g. B5, Building A, Tower 2
+      required: true,
       trim: true,
     },
 
     numberOfUnits: {
       type: Number,
-      default: 0,
+      required: true,
       min: 0,
     },
 
     buildingOrder: {
-      type: Number, // Used for route / service order
+      type: Number,
+      default: 0,
       index: true,
     },
 
     address: {
       type: String,
+      required: true,
       trim: true,
     },
 
@@ -41,6 +43,7 @@ const buildingSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+      index: true,
     },
   },
   { timestamps: true }

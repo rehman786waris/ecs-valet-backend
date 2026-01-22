@@ -1,4 +1,11 @@
 const Property = require("../models/properties/property.model");
+const Building = require("../models/buildings.model");
+
+/* =====================================================
+   HELPER: PARSE BOOLEAN
+===================================================== */
+const parseBoolean = (value) =>
+  value === true || value === "true" || value === "on";
 
 /* =====================================================
    CREATE PROPERTY
@@ -8,40 +15,68 @@ exports.createProperty = async (req, res) => {
     const data = req.body;
 
     if (data.redundantRouteService !== undefined) {
-      data.redundantRouteService =
-        data.redundantRouteService === true ||
-        data.redundantRouteService === "true";
+      data.redundantRouteService = parseBoolean(data.redundantRouteService);
     }
 
-    // Attach images to buildings
-    if (req.files?.length && data.buildings) {
-      const buildings = JSON.parse(data.buildings);
+    const buildingsPayload = data.buildings
+      ? JSON.parse(data.buildings)
+      : [];
 
-      buildings[0].images = req.files.map(
-        (file) => file.location
-      );
-
-      data.buildings = buildings;
-    }
-
+    // Create property
     const property = await Property.create({
       ...data,
       company: req.user.company,
       createdBy: req.user._id,
+      buildings: [],
     });
 
+    const files = req.files || [];
+    let fileIndex = 0;
+
+    const createdBuildings = [];
+
+    for (let i = 0; i < buildingsPayload.length; i++) {
+      const b = buildingsPayload[i];
+
+      // Assign files sequentially per building
+      const images = [];
+      const imageCount = Number(b.imageCount || 0);
+
+      for (let j = 0; j < imageCount; j++) {
+        if (files[fileIndex]) {
+          images.push({ url: files[fileIndex].location });
+          fileIndex++;
+        }
+      }
+
+      const building = await Building.create({
+        property: property._id,
+        name: b.name,
+        numberOfUnits: b.numberOfUnits,
+        buildingOrder: b.buildingOrder || 0,
+        address: b.address,
+        images,
+      });
+
+      createdBuildings.push(building._id);
+    }
+
+    property.buildings = createdBuildings;
+    await property.save();
+
     res.status(201).json({
+      success: true,
       message: "Property created successfully",
       data: property,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 
 /* =====================================================
-   GET ALL PROPERTIES (WITH FILTERS)
+   GET ALL PROPERTIES
 ===================================================== */
 exports.getProperties = async (req, res) => {
   try {
@@ -74,6 +109,10 @@ exports.getProperties = async (req, res) => {
     const properties = await Property.find(query)
       .populate("customer", "name")
       .populate("propertyManager", "firstName lastName")
+      .populate({
+        path: "buildings",
+        select: "name numberOfUnits buildingOrder images isActive",
+      })
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit));
@@ -81,6 +120,7 @@ exports.getProperties = async (req, res) => {
     const total = await Property.countDocuments(query);
 
     res.json({
+      success: true,
       data: properties,
       pagination: {
         total,
@@ -89,7 +129,7 @@ exports.getProperties = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -105,23 +145,28 @@ exports.getPropertyById = async (req, res) => {
     })
       .populate("customer")
       .populate("propertyManager")
-      .populate("createdBy", "firstName lastName");
+      .populate("createdBy", "firstName lastName")
+      .populate("buildings");
 
     if (!property) {
-      return res.status(404).json({ message: "Property not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Property not found" });
     }
 
-    res.json({ data: property });
+    res.json({ success: true, data: property });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 /* =====================================================
-   UPDATE PROPERTY
+   UPDATE PROPERTY (PROPERTY ONLY)
 ===================================================== */
 exports.updateProperty = async (req, res) => {
   try {
+    const data = req.body;
+
     const property = await Property.findOne({
       _id: req.params.id,
       company: req.user.company,
@@ -129,22 +174,26 @@ exports.updateProperty = async (req, res) => {
     });
 
     if (!property) {
-      return res.status(404).json({ message: "Property not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Property not found" });
     }
 
-    if (req.files?.length && req.body.buildings) {
-      const buildings = JSON.parse(req.body.buildings);
-      buildings[0].images = [
-        ...(buildings[0].images || []),
-        ...req.files.map((file) => file.location),
-      ];
-      property.buildings = buildings;
+    /* ======================
+       BOOLEAN FIX
+    ====================== */
+    if (data.redundantRouteService !== undefined) {
+      property.redundantRouteService = parseBoolean(
+        data.redundantRouteService
+      );
     }
 
+    /* ======================
+       UPDATE PROPERTY FIELDS
+    ====================== */
     const allowedFields = [
       "customer",
       "propertyManager",
-      "redundantRouteService",
       "propertyName",
       "propertyType",
       "addressType",
@@ -156,22 +205,56 @@ exports.updateProperty = async (req, res) => {
     ];
 
     allowedFields.forEach((field) => {
-      if (req.body[field] !== undefined) {
-        property[field] = req.body[field];
+      if (data[field] !== undefined) {
+        property[field] = data[field];
       }
     });
 
+    /* ======================
+       UPDATE BUILDING IMAGES
+    ====================== */
+    if (data.buildings && req.files?.length) {
+      const buildingsPayload = JSON.parse(data.buildings);
+      const files = req.files;
+      let fileIndex = 0;
+
+      for (let i = 0; i < buildingsPayload.length; i++) {
+        const b = buildingsPayload[i];
+
+        if (!b._id || !b.imageCount) continue;
+
+        const building = await Building.findOne({
+          _id: b._id,
+          property: property._id,
+        });
+
+        if (!building) continue;
+
+        for (let j = 0; j < b.imageCount; j++) {
+          if (files[fileIndex]) {
+            building.images.push({
+              url: files[fileIndex].location,
+            });
+            fileIndex++;
+          }
+        }
+
+        // 🔥 THIS updates building.updatedAt
+        await building.save();
+      }
+    }
+
+    // 🔥 THIS updates property.updatedAt
     await property.save();
 
     res.json({
+      success: true,
       message: "Property updated successfully",
-      data: property,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
-
 
 /* =====================================================
    TOGGLE PROPERTY STATUS
@@ -185,18 +268,21 @@ exports.togglePropertyStatus = async (req, res) => {
     });
 
     if (!property) {
-      return res.status(404).json({ message: "Property not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Property not found" });
     }
 
     property.isActive = !property.isActive;
     await property.save();
 
     res.json({
+      success: true,
       message: "Property status updated",
       data: property,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -212,14 +298,19 @@ exports.deleteProperty = async (req, res) => {
     });
 
     if (!property) {
-      return res.status(404).json({ message: "Property not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Property not found" });
     }
 
     property.isDeleted = true;
     await property.save();
 
-    res.json({ message: "Property deleted successfully" });
+    res.json({
+      success: true,
+      message: "Property deleted successfully",
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
