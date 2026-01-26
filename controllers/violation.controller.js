@@ -1,4 +1,6 @@
 const Violation = require("../models/violations/violation.model");
+const User = require("../models/userModel");
+
 
 /* =====================================================
    CREATE VIOLATION (MANUAL / SCAN)
@@ -67,6 +69,7 @@ exports.createViolation = async (req, res) => {
 /* =====================================================
    GET ALL VIOLATIONS (ADMIN)
 ===================================================== */
+
 exports.getViolations = async (req, res) => {
   try {
     const {
@@ -77,6 +80,7 @@ exports.getViolations = async (req, res) => {
       rule,
       action,
       search,
+      user, // "Johns Doe"
     } = req.query;
 
     const query = {
@@ -89,11 +93,26 @@ exports.getViolations = async (req, res) => {
     if (rule) query.rule = rule;
     if (action) query.action = action;
 
+    // ================= SEARCH (BIN / UNIT) =================
     if (search) {
       query.$or = [
         { unitNumber: { $regex: search, $options: "i" } },
         { binTagId: { $regex: search, $options: "i" } },
       ];
+    }
+
+    // ================= USER NAME SEARCH =================
+    if (user) {
+      const nameParts = user.trim().split(/\s+/);
+
+      const users = await User.find({
+        $or: [
+          { firstName: { $regex: nameParts[0], $options: "i" } },
+          { lastName: { $regex: nameParts[nameParts.length - 1], $options: "i" } },
+        ],
+      }).select("_id");
+
+      query.user = { $in: users.map(u => u._id) };
     }
 
     const violations = await Violation.find(query)
@@ -102,7 +121,7 @@ exports.getViolations = async (req, res) => {
       .populate("rule", "name")
       .populate("action", "name")
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
+      .skip((page - 1) * Number(limit))
       .limit(Number(limit));
 
     const total = await Violation.countDocuments(query);
