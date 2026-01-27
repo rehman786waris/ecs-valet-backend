@@ -9,12 +9,39 @@ const uploadViolationImages = require("../middlewares/uploadViolationImages");
    VIOLATION ROUTES
 ===================================================== */
 
-// Create violation with images
-router.post("/", adminAuth, uploadViolationImages.array("images", 5), violationController.createViolation);
-router.put("/:id", adminAuth, uploadViolationImages.array("images", 5), violationController.updateViolation);
+// CREATE
+router.post(
+  "/",
+  adminAuth,
+  uploadViolationImages.array("images", 5),
+  violationController.createViolation
+);
+
+// UPDATE
+router.put(
+  "/:id",
+  adminAuth,
+  uploadViolationImages.array("images", 5),
+  violationController.updateViolation
+);
+
+// LIST
 router.get("/", adminAuth, violationController.getViolations);
+
+// ✅ STATIC ROUTE — MUST COME BEFORE :id
+router.get(
+  "/top-violators",
+  adminAuth,
+  violationController.getTopViolators
+);
+
+// READ BY ID
 router.get("/:id", adminAuth, violationController.getViolationById);
+
+// UPDATE STATUS
 router.patch("/:id/status", adminAuth, violationController.updateViolationStatus);
+
+// DELETE
 router.delete("/:id", adminAuth, violationController.deleteViolation);
 
 module.exports = router;

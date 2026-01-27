@@ -1,4 +1,6 @@
 const Violation = require("../models/violations/violation.model");
+const TopViolator = require("../models/violations/topViolator.model");
+
 const User = require("../models/userModel");
 
 
@@ -80,7 +82,7 @@ exports.getViolations = async (req, res) => {
       rule,
       action,
       search,
-      user, // "Johns Doe"
+      user,
     } = req.query;
 
     const query = {
@@ -108,14 +110,20 @@ exports.getViolations = async (req, res) => {
       const users = await User.find({
         $or: [
           { firstName: { $regex: nameParts[0], $options: "i" } },
-          { lastName: { $regex: nameParts[nameParts.length - 1], $options: "i" } },
+          {
+            lastName: {
+              $regex: nameParts[nameParts.length - 1],
+              $options: "i",
+            },
+          },
         ],
       }).select("_id");
 
-      query.user = { $in: users.map(u => u._id) };
+      query.user = { $in: users.map((u) => u._id) };
     }
 
     const violations = await Violation.find(query)
+      .populate("company", "companyName") // ✅ ADDED
       .populate("user", "firstName lastName")
       .populate("property", "name address")
       .populate("rule", "name")
@@ -138,6 +146,7 @@ exports.getViolations = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 ///---
 
@@ -298,3 +307,58 @@ exports.deleteViolation = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+/* =====================================================
+   GET TOP VIOLATORS
+   GET /api/top-violators
+===================================================== */
+exports.getTopViolators = async (req, res) => {
+  try {
+    const {
+      top = 5,                 // dropdown: Top 5 / Top 10
+      period = "all",          // daily | weekly | monthly | all
+    } = req.query;
+
+    const companyId = req.user.company; // tenant isolation
+
+    // ================= FETCH TOP VIOLATORS =================
+    const topViolators = await TopViolator.find({
+      company: companyId,
+      period,
+    })
+      .sort({ totalViolations: -1 })
+      .limit(Number(top))
+      .select("binTagId buildingName totalViolations propertyLabel");
+
+    // ================= TOTAL VIOLATION COUNT =================
+    const totalAgg = await TopViolator.aggregate([
+      {
+        $match: {
+          company: companyId,
+          period,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: "$totalViolations" },
+        },
+      },
+    ]);
+
+    res.json({
+      data: topViolators,
+      summary: {
+        totalViolations: totalAgg[0]?.total || 0,
+        period,
+        top: Number(top),
+      },
+    });
+  } catch (error) {
+    console.error("Top Violators Error:", error);
+    res.status(500).json({
+      message: "Failed to fetch top violators",
+    });
+  }
+};
+
