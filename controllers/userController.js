@@ -13,7 +13,16 @@ exports.createUser = async (req, res) => {
 
     if (!company?.companyName) {
       return res.status(400).json({ message: "Company details are required" });
-    }    
+    }
+
+    const exists = await User.findOne({
+      email: userData.email,
+      company: company._id,
+    });
+
+    if (exists) {
+      return res.status(409).json({ message: "User already exists" });
+    }
 
     const newCompany = await Company.create(company);
     const passwordHash = await hashPassword(password);
@@ -25,7 +34,7 @@ exports.createUser = async (req, res) => {
     });
 
     res.status(201).json({
-      message: "User and Company created successfully",
+      message: "User and company created successfully",
       user: {
         id: user._id,
         firstName: user.firstName,
@@ -40,49 +49,41 @@ exports.createUser = async (req, res) => {
   }
 };
 
+
 /* =====================================================
    LOGIN
 ===================================================== */
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
-
     const user = await User.findOne({
-      email,
+      email: req.body.email,
       isDeleted: false,
     }).select("+passwordHash");
 
-    if (!user) {
-      return res.status(401).json({ message: "Invalid email or password" });
+    if (!user || !user.isEnabled) {
+      return res.status(401).json({ message: "Account disabled or invalid" });
     }
 
-    const isMatch = await comparePassword(password, user.passwordHash);
+    const isMatch = await comparePassword(req.body.password, user.passwordHash);
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    const accessToken = generateToken(user);
-    const refreshToken = generateRefreshToken(user);
-
     res.json({
-      message: user.isEnabled
-        ? "Login successful"
-        : "Login allowed but account is disabled",
-      disabled: !user.isEnabled,
-      accessToken,
-      refreshToken,
+      accessToken: generateToken(user),
+      refreshToken: generateRefreshToken(user),
       user: {
         id: user._id,
         firstName: user.firstName,
         lastName: user.lastName,
-        email: user.email,
         role: user.role,
       },
     });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
+
 
 /* =====================================================
    GET ALL USERS (MULTI-TENANT)
@@ -93,10 +94,13 @@ exports.getUsers = async (req, res) => {
       company: req.user.company,
       isDeleted: false,
     })
-      .select("-passwordHash")
+      .select("-passwordHash -resetCode")
       .sort({ createdAt: -1 });
 
-    res.json(users);
+    res.json({
+      total: users.length,
+      data: users,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -111,7 +115,7 @@ exports.getUser = async (req, res) => {
       _id: req.params.id,
       company: req.user.company,
       isDeleted: false,
-    }).select("-passwordHash");
+    }).select("-passwordHash -resetCode");
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -123,75 +127,68 @@ exports.getUser = async (req, res) => {
   }
 };
 
+
+
 /* =====================================================
    UPDATE USER
 ===================================================== */
 exports.updateUser = async (req, res) => {
-  try {
-    const user = await User.findOne({
-      _id: req.params.id,
-      company: req.user.company,
-      isDeleted: false,
-    }).select("-passwordHash");
+  const user = await User.findOne({
+    _id: req.params.id,
+    company: req.user.company,
+    isDeleted: false,
+  });
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    /* ======================
-       AVATAR UPDATE (S3)
-    ====================== */
-    if (req.file) {
-      user.profileImage = {
-        url: req.file.location, // S3 public URL
-        key: req.file.key,      // S3 object key
-        provider: "s3",
-        uploadedAt: new Date(),
-      };
-    }
-
-    /* ======================
-       OTHER UPDATES
-    ====================== */
-    const blockedFields = ["passwordHash", "company", "profileImage"];
-    blockedFields.forEach((f) => delete req.body[f]);
-
-    Object.assign(user, req.body);
-    await user.save();
-
-    res.json({
-      message: "User updated successfully",
-      user,
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
   }
+
+  // Block dangerous fields
+  const forbidden = [
+    "passwordHash",
+    "company",
+    "tokenVersion",
+    "resetCode",
+  ];
+  forbidden.forEach((f) => delete req.body[f]);
+
+  if (req.file) {
+    user.profileImage = {
+      url: req.file.location,
+      key: req.file.key,
+      provider: "s3",
+      uploadedAt: new Date(),
+    };
+  }
+
+  Object.assign(user, req.body);
+  await user.save();
+
+  res.json({
+    message: "User updated successfully",
+    user,
+  });
 };
+
 
 
 /* =====================================================
    SOFT DELETE USER
 ===================================================== */
 exports.deleteUser = async (req, res) => {
-  try {
-    const user = await User.findOneAndUpdate(
-      {
-        _id: req.params.id,
-        company: req.user.company,
-      },
-      { isDeleted: true },
-      { new: true }
-    );
+  const user = await User.findOneAndUpdate(
+    { _id: req.params.id, company: req.user.company },
+    { isDeleted: true },
+    { new: true }
+  );
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    res.json({ message: "User deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
   }
+
+  res.json({ message: "User deleted successfully" });
 };
+
 
 /* =====================================================
    ENABLE / DISABLE USER (ADMIN)

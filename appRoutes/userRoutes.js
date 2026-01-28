@@ -1,34 +1,94 @@
 const express = require("express");
 const router = express.Router();
-const user = require("../controllers/userController");
+
+const userController = require("../controllers/userController");
+
 const auth = require("../middlewares/authMiddleware");
-const superAdminAuth = require("../middlewares/superAdminAuth");
 const adminAuth = require("../middlewares/adminAuthMiddleware");
+const superAdminAuth = require("../middlewares/superAdminAuth");
 const uploadUserAvatar = require("../middlewares/uploadUserAvatarS3");
 
-// ---------------------- PUBLIC ROUTES ----------------------
-router.post("/create", user.createUser);
-router.post("/login", user.login);
-router.post("/refresh", user.refreshToken);
-router.post("/forgot-password", user.forgotPassword);
-router.post("/reset-password", user.resetPassword);
+const { validate } = require("../middlewares/validateRequest");
+const {
+  createUserSchema,
+  loginSchema,
+  updateUserSchema,
+} = require("../middlewares/user.validation");
 
-// ---------------------- ENABLE / DISABLE ----------------------
-router.put("/:id/enable", adminAuth, superAdminAuth, user.enableUser);
-router.put("/:id/disable", adminAuth, superAdminAuth, user.disableUser);
 
-// ---------------------- PROTECTED ROUTES ----------------------
-router.get("/search", auth, user.searchUsers);
-router.get("/", auth, user.getUsers);
-router.get("/:id", auth, user.getUser);
 
+// =====================================================
+// PUBLIC ROUTES
+// =====================================================
+
+// Create user + company
+router.post(
+  "/",
+  validate(createUserSchema),
+  userController.createUser
+);
+
+// Login
+router.post(
+  "/login",
+  validate(loginSchema),
+  userController.login
+);
+
+// Refresh token
+router.post("/refresh", userController.refreshToken);
+
+// Forgot / Reset password
+router.post("/forgot-password", userController.forgotPassword);
+router.post("/reset-password", userController.resetPassword);
+
+
+// =====================================================
+// PROTECTED ROUTES (AUTH REQUIRED)
+// =====================================================
+
+// Get all users (multi-tenant)
+router.get("/", auth, userController.getUsers);
+
+// Search users
+router.get("/search", auth, userController.searchUsers);
+
+// Get single user
+router.get("/:id", auth, userController.getUser);
+
+// Update user (with avatar upload)
 router.put(
   "/:id",
   auth,
   uploadUserAvatar.single("avatar"),
-  user.updateUser // ✅ FIXED
+  validate(updateUserSchema),
+  userController.updateUser
 );
 
-router.delete("/:id", auth, user.deleteUser);
+// Soft delete user
+router.delete("/:id", auth, userController.deleteUser);
+
+
+// =====================================================
+// ADMIN / SUPER ADMIN ACTIONS
+// =====================================================
+
+// Enable user
+router.put(
+  "/:id/enable",
+  auth,
+  adminAuth,
+  superAdminAuth,
+  userController.enableUser
+);
+
+// Disable user
+router.put(
+  "/:id/disable",
+  auth,
+  adminAuth,
+  superAdminAuth,
+  userController.disableUser
+);
 
 module.exports = router;

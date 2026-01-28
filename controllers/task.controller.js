@@ -63,7 +63,7 @@ exports.getTasks = async (req, res) => {
     const [tasks, total] = await Promise.all([
       Task.find(query)
         .populate("taskOwner", "firstName lastName")
-        .populate("property", "name")
+        .populate("property", "propertyName")
         .populate("createdBy", "firstName lastName")
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
