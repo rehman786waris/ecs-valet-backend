@@ -4,6 +4,32 @@ const { hashPassword, comparePassword } = require("../utils/hashPassword");
 const { generateToken, generateRefreshToken } = require("../utils/generateToken");
 const jwt = require("jsonwebtoken");
 
+const Subscription = require("../models/plans/subscription.model");
+const Plan = require("../models/plans/plan.model");
+
+async function createTrialSubscription(companyId) {
+  const trialPlan = await Plan.findOne({
+    isActive: true,
+    "trial.isAvailable": true,
+  });
+
+  if (!trialPlan) return null;
+
+  const now = new Date();
+  const trialEndsAt = new Date(
+    now.getTime() + trialPlan.trial.durationDays * 86400000
+  );
+
+  return await Subscription.create({
+    company: companyId,
+    plan: trialPlan._id,
+    status: "Trial",
+    startDate: now,
+    trialEndsAt,
+  });
+}
+
+
 /* =====================================================
    CREATE USER + COMPANY
 ===================================================== */
@@ -15,36 +41,86 @@ exports.createUser = async (req, res) => {
       return res.status(400).json({ message: "Company details are required" });
     }
 
-    const exists = await User.findOne({
-      email: userData.email,
-      company: company._id,
+    // 1️⃣ Find or create company
+    let existingCompany = await Company.findOne({
+      companyName: company.companyName.trim(),
     });
 
-    if (exists) {
-      return res.status(409).json({ message: "User already exists" });
+    let subscription = null;
+    let isNewCompany = false;
+
+    if (!existingCompany) {
+      existingCompany = await Company.create(company);
+      isNewCompany = true;
+
+      // ✅ Create trial subscription
+      subscription = await createTrialSubscription(existingCompany._id);
+    } else {
+      subscription = await Subscription.findOne({
+        company: existingCompany._id,
+      });
     }
 
-    const newCompany = await Company.create(company);
+    // 2️⃣ Check duplicate email
+    const emailExists = await User.findOne({
+      email: userData.email,
+      company: existingCompany._id,
+      isDeleted: false,
+    });
+
+    if (emailExists) {
+      return res.status(409).json({
+        message: "Email already exists in this company",
+      });
+    }
+
+    // 3️⃣ Check duplicate username
+    const usernameExists = await User.findOne({
+      username: userData.username,
+      company: existingCompany._id,
+      isDeleted: false,
+    });
+
+    if (usernameExists) {
+      return res.status(409).json({
+        message: "Username already exists in this company",
+      });
+    }
+
+    // 4️⃣ Create user
     const passwordHash = await hashPassword(password);
 
     const user = await User.create({
       ...userData,
       passwordHash,
-      company: newCompany._id,
+      company: existingCompany._id,
+      subscription: subscription?._id || null,
     });
 
+    // 5️⃣ Populate subscription for response
+    const populatedSubscription = subscription
+      ? await Subscription.findById(subscription._id)
+        .populate("plan", "name pricing features")
+      : null;
+
     res.status(201).json({
-      message: "User and company created successfully",
+      message: "User created successfully",
       user: {
         id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
         email: user.email,
+        username: user.username,
         role: user.role,
       },
-      company: newCompany,
+      company: existingCompany,
+      subscription: populatedSubscription,
+      mode: isNewCompany ? "Trial started" : "Existing company",
     });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        message: "Duplicate email or username",
+      });
+    }
     res.status(500).json({ message: error.message });
   }
 };
@@ -58,7 +134,9 @@ exports.login = async (req, res) => {
     const user = await User.findOne({
       email: req.body.email,
       isDeleted: false,
-    }).select("+passwordHash");
+    })
+      .select("+passwordHash")
+      .populate("subscription");
 
     if (!user || !user.isEnabled) {
       return res.status(401).json({ message: "Account disabled or invalid" });
@@ -69,6 +147,11 @@ exports.login = async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
+    const subscription = user.subscription
+      ? await Subscription.findById(user.subscription)
+        .populate("plan", "name pricing features")
+      : null;
+
     res.json({
       accessToken: generateToken(user),
       refreshToken: generateRefreshToken(user),
@@ -78,6 +161,7 @@ exports.login = async (req, res) => {
         lastName: user.lastName,
         role: user.role,
       },
+      subscription,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -85,15 +169,21 @@ exports.login = async (req, res) => {
 };
 
 
+
 /* =====================================================
    GET ALL USERS (MULTI-TENANT)
 ===================================================== */
 exports.getUsers = async (req, res) => {
   try {
-    const users = await User.find({
-      company: req.user.company,
-      isDeleted: false,
-    })
+    const filter = { isDeleted: false };
+
+    if (req.user.role !== "super-admin") {
+      filter.company = req.user.company;
+    }
+
+    const users = await User.find(filter)
+      .populate("company", "companyName")
+      .populate("subscription")
       .select("-passwordHash -resetCode")
       .sort({ createdAt: -1 });
 
@@ -106,6 +196,8 @@ exports.getUsers = async (req, res) => {
   }
 };
 
+
+
 /* =====================================================
    GET SINGLE USER (SAFE)
 ===================================================== */
@@ -115,17 +207,28 @@ exports.getUser = async (req, res) => {
       _id: req.params.id,
       company: req.user.company,
       isDeleted: false,
-    }).select("-passwordHash -resetCode");
+    })
+      .select("-passwordHash -resetCode")
+      .populate("subscription");
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    res.json(user);
+    const subscription = user.subscription
+      ? await Subscription.findById(user.subscription)
+        .populate("plan", "name pricing features")
+      : null;
+
+    res.json({
+      ...user.toObject(),
+      subscription,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 
 
@@ -373,3 +476,67 @@ exports.searchUsers = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+/* =====================================================
+   CHANGE PASSWORD (AUTH REQUIRED)
+===================================================== */
+exports.changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        message: "Current password and new password are required",
+      });
+    }
+
+    // 1️⃣ Load user with password
+    const user = await User.findOne({
+      _id: req.user.id,
+      isDeleted: false,
+    }).select("+passwordHash");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // 2️⃣ Verify current password
+    const isMatch = await comparePassword(
+      currentPassword,
+      user.passwordHash
+    );
+
+    if (!isMatch) {
+      return res.status(401).json({
+        message: "Current password is incorrect",
+      });
+    }
+
+    // 3️⃣ Prevent reusing same password
+    const isSame = await comparePassword(
+      newPassword,
+      user.passwordHash
+    );
+
+    if (isSame) {
+      return res.status(400).json({
+        message: "New password must be different from current password",
+      });
+    }
+
+    // 4️⃣ Hash & update password
+    user.passwordHash = await hashPassword(newPassword);
+
+    // 5️⃣ Invalidate old tokens
+    user.tokenVersion += 1;
+
+    await user.save();
+
+    res.json({
+      message: "Password changed successfully. Please login again.",
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+

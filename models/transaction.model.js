@@ -8,7 +8,7 @@ const transactionSchema = new mongoose.Schema(
     // ======================
     user: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Employee", // or User / CompanyAdmin
+      ref: "User", // or User / CompanyAdmin
       required: true,
     },
 

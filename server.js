@@ -30,11 +30,9 @@ const exceptionLogRoutes = require("./appRoutes/exceptionLog.routes");
 const roleRoutes = require("./appRoutes/role.routes");
 const clockLogRoutes = require("./appRoutes/employeeClockLog.routes");
 const noteSubjectRoutes = require("./appRoutes/noteSubject.routes");
-
-
-
-
-
+const planRoutes = require("./appRoutes/plan.routes");
+const subscriptionRoutes = require("./appRoutes/subscription.routes");
+const transactionRoutes = require("./appRoutes/transaction.routes");
 
 
 const app = express();
@@ -72,6 +70,11 @@ app.use("/api/exceptions", exceptionLogRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/clock-logs", clockLogRoutes);
 app.use("/api/note-subjects", noteSubjectRoutes);
+app.use("/api/plans", planRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
+app.use("/api/transactions", transactionRoutes);
+
+
 
 app.get("/", (req, res) => {
   res.send("Server running with dotenv!");

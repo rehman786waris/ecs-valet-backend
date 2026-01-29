@@ -13,6 +13,7 @@ const {
   createUserSchema,
   loginSchema,
   updateUserSchema,
+  changePasswordSchema,
 } = require("../middlewares/user.validation");
 
 
@@ -41,6 +42,14 @@ router.post("/refresh", userController.refreshToken);
 // Forgot / Reset password
 router.post("/forgot-password", userController.forgotPassword);
 router.post("/reset-password", userController.resetPassword);
+
+// Change password (logged-in user)
+router.post(
+  "/change-password",
+  auth,
+  validate(changePasswordSchema),
+  userController.changePassword
+);
 
 
 // =====================================================

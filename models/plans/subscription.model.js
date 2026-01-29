@@ -1,4 +1,3 @@
-// models/subscription.model.js
 const mongoose = require("mongoose");
 
 const subscriptionSchema = new mongoose.Schema(
@@ -26,6 +25,7 @@ const subscriptionSchema = new mongoose.Schema(
       type: String,
       enum: ["Trial", "Active", "Expired", "Cancelled"],
       default: "Trial",
+      index: true,
     },
 
     startDate: {
@@ -35,9 +35,18 @@ const subscriptionSchema = new mongoose.Schema(
 
     endDate: {
       type: Date,
+      index: true,
     },
+
+    trialEndsAt: {
+      type: Date,
+      index: true,
+    },
+
+    cancelledAt: Date,
   },
   { timestamps: true }
 );
 
+// ✅ THIS LINE IS MANDATORY
 module.exports = mongoose.model("Subscription", subscriptionSchema);
