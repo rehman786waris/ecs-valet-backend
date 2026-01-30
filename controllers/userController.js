@@ -52,8 +52,6 @@ exports.createUser = async (req, res) => {
     if (!existingCompany) {
       existingCompany = await Company.create(company);
       isNewCompany = true;
-
-      // ✅ Create trial subscription
       subscription = await createTrialSubscription(existingCompany._id);
     } else {
       subscription = await Subscription.findOne({
@@ -61,33 +59,28 @@ exports.createUser = async (req, res) => {
       });
     }
 
-    // 2️⃣ Check duplicate email
-    const emailExists = await User.findOne({
-      email: userData.email,
-      company: existingCompany._id,
-      isDeleted: false,
-    });
-
-    if (emailExists) {
-      return res.status(409).json({
-        message: "Email already exists in this company",
-      });
+    // 2️⃣ Duplicate checks
+    if (
+      await User.findOne({
+        email: userData.email,
+        company: existingCompany._id,
+        isDeleted: false,
+      })
+    ) {
+      return res.status(409).json({ message: "Email already exists" });
     }
 
-    // 3️⃣ Check duplicate username
-    const usernameExists = await User.findOne({
-      username: userData.username,
-      company: existingCompany._id,
-      isDeleted: false,
-    });
-
-    if (usernameExists) {
-      return res.status(409).json({
-        message: "Username already exists in this company",
-      });
+    if (
+      await User.findOne({
+        username: userData.username,
+        company: existingCompany._id,
+        isDeleted: false,
+      })
+    ) {
+      return res.status(409).json({ message: "Username already exists" });
     }
 
-    // 4️⃣ Create user
+    // 3️⃣ Create user
     const passwordHash = await hashPassword(password);
 
     const user = await User.create({
@@ -97,22 +90,21 @@ exports.createUser = async (req, res) => {
       subscription: subscription?._id || null,
     });
 
-    // 5️⃣ Populate subscription for response
-    const populatedSubscription = subscription
-      ? await Subscription.findById(subscription._id)
-        .populate("plan", "name pricing features")
-      : null;
+    // 4️⃣ Populate FULL user (SINGLE SOURCE)
+    const populatedUser = await User.findById(user._id)
+      .populate("company")
+      .populate({
+        path: "subscription",
+        populate: {
+          path: "plan",
+          select: "name pricing features",
+        },
+      })
+      .lean();
 
     res.status(201).json({
       message: "User created successfully",
-      user: {
-        id: user._id,
-        email: user.email,
-        username: user.username,
-        role: user.role,
-      },
-      company: existingCompany,
-      subscription: populatedSubscription,
+      user: populatedUser,
       mode: isNewCompany ? "Trial started" : "Existing company",
     });
   } catch (error) {
@@ -125,7 +117,6 @@ exports.createUser = async (req, res) => {
   }
 };
 
-
 /* =====================================================
    LOGIN
 ===================================================== */
@@ -136,7 +127,8 @@ exports.login = async (req, res) => {
       isDeleted: false,
     })
       .select("+passwordHash")
-      .populate("subscription");
+      .populate("company")
+      .populate("subscription")
 
     if (!user || !user.isEnabled) {
       return res.status(401).json({ message: "Account disabled or invalid" });
@@ -155,20 +147,13 @@ exports.login = async (req, res) => {
     res.json({
       accessToken: generateToken(user),
       refreshToken: generateRefreshToken(user),
-      user: {
-        id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role,
-      },
+      user: user,
       subscription,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
-
-
 
 /* =====================================================
    GET ALL USERS (MULTI-TENANT)
@@ -182,7 +167,7 @@ exports.getUsers = async (req, res) => {
     }
 
     const users = await User.find(filter)
-      .populate("company", "companyName")
+      .populate("company")
       .populate("subscription")
       .select("-passwordHash -resetCode")
       .sort({ createdAt: -1 });
@@ -209,7 +194,8 @@ exports.getUser = async (req, res) => {
       isDeleted: false,
     })
       .select("-passwordHash -resetCode")
-      .populate("subscription");
+      .populate("company")
+      .populate("subscription")
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
