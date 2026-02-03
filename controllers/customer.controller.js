@@ -5,6 +5,10 @@ const Customer = require("../models/customer.model");
 ===================================================== */
 exports.createCustomer = async (req, res) => {
   try {
+    if (req.body?.username) {
+      req.body.username = req.body.username.toLowerCase();
+    }
+
     const customer = await Customer.create(req.body);
 
     return res.status(201).json({
@@ -27,8 +31,10 @@ exports.getCustomers = async (req, res) => {
     const { page = 1, limit = 10, search = "" } = req.query;
 
     const query = {
+      isActive: true,
       $or: [
         { name: { $regex: search, $options: "i" } },
+        { username: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
         { phone: { $regex: search, $options: "i" } },
       ],
@@ -60,7 +66,10 @@ exports.getCustomers = async (req, res) => {
 ===================================================== */
 exports.getCustomerById = async (req, res) => {
   try {
-    const customer = await Customer.findById(req.params.id);
+    const customer = await Customer.findOne({
+      _id: req.params.id,
+      isActive: true,
+    });
 
     if (!customer) {
       return res.status(404).json({ message: "Customer not found" });
@@ -80,8 +89,12 @@ exports.getCustomerById = async (req, res) => {
 ===================================================== */
 exports.updateCustomer = async (req, res) => {
   try {
-    const customer = await Customer.findByIdAndUpdate(
-      req.params.id,
+    if (req.body?.username) {
+      req.body.username = req.body.username.toLowerCase();
+    }
+
+    const customer = await Customer.findOneAndUpdate(
+      { _id: req.params.id, isActive: true },
       req.body,
       { new: true }
     );
@@ -107,7 +120,10 @@ exports.updateCustomer = async (req, res) => {
 ===================================================== */
 exports.toggleCustomerStatus = async (req, res) => {
   try {
-    const customer = await Customer.findById(req.params.id);
+    const customer = await Customer.findOne({
+      _id: req.params.id,
+      isActive: true,
+    });
 
     if (!customer) {
       return res.status(404).json({ message: "Customer not found" });
@@ -133,8 +149,8 @@ exports.toggleCustomerStatus = async (req, res) => {
 ===================================================== */
 exports.deleteCustomer = async (req, res) => {
   try {
-    const customer = await Customer.findByIdAndUpdate(
-      req.params.id,
+    const customer = await Customer.findOneAndUpdate(
+      { _id: req.params.id, isActive: true },
       { isActive: false },
       { new: true }
     );

@@ -7,7 +7,7 @@ const Plan = require("../models/plans/plan.model");
 ===================================================== */
 exports.purchaseSubscription = async (req, res) => {
   try {
-    const { plan, billingCycle, transactionId, amount } = req.body;
+    const { plan, billingCycle, transactionId, amount, status } = req.body;
 
     // 1️⃣ Validate input
     if (!plan || !billingCycle || !transactionId || !amount) {
@@ -42,7 +42,16 @@ exports.purchaseSubscription = async (req, res) => {
       });
     }
 
-    // 5️⃣ Create transaction
+    // 5️⃣ Validate transaction status
+    const allowedStatuses = ["Paid", "Failed", "Refunded"];
+    const transactionStatus = status || "Paid";
+    if (!allowedStatuses.includes(transactionStatus)) {
+      return res.status(400).json({
+        message: "Invalid transaction status",
+      });
+    }
+
+    // 6️⃣ Create transaction
     const transaction = await Transaction.create({
       user: req.user.id,
       company: subscription.company,
@@ -50,12 +59,12 @@ exports.purchaseSubscription = async (req, res) => {
       subscription: subscription._id,
       amount,
       billingCycle,
-      status: "Paid",
+      status: transactionStatus,
       transactionId,
       paymentGateway: "Manual", // Stripe / PayPal later
     });
 
-    // 6️⃣ Activate subscription
+    // 7️⃣ Activate subscription
     subscription.plan = plan;
     subscription.billingCycle = billingCycle;
     subscription.status = "Active";

@@ -1,6 +1,7 @@
 // middlewares/adminAuthMiddleware.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/userModel');
+const PropertyManager = require("../models/propertyManagerModel");
 
 module.exports = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -13,7 +14,12 @@ module.exports = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // Load the caller (admin) from DB to check tokenVersion and isEnabled
-    const caller = await User.findById(decoded.id);
+    let caller = await User.findById(decoded.id);
+    let callerType = "USER";
+    if (!caller) {
+      caller = await PropertyManager.findById(decoded.id);
+      callerType = "PROPERTY_MANAGER";
+    }
     if (!caller) return res.status(404).json({ message: "User not found" });
 
     // Caller must be enabled
@@ -27,13 +33,14 @@ module.exports = async (req, res, next) => {
     }
 
     // Check role
-    const allowedRoles = ["admin", "super-admin", "property-manager"]; // adjust as needed
+    const allowedRoles = ["admin", "super-admin", "PROPERTY_MANAGER"]; // adjust as needed
     if (!allowedRoles.includes(caller.role)) {
       return res.status(403).json({ message: "Insufficient permissions" });
     }
 
     // attach caller
     req.user = caller;
+    req.userType = callerType;
     next();
   } catch (err) {
     return res.status(401).json({ message: "Invalid or expired token" });

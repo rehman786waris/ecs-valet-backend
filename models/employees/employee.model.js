@@ -15,6 +15,15 @@ const employeeSchema = new mongoose.Schema(
       index: true,
     },
 
+    username: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+      unique: true,
+      index: true,
+    },
+
     mobile: {
       type: String,
       required: true,
@@ -130,6 +139,7 @@ employeeSchema.pre("save", function () {
 
 /* INDEXES */
 employeeSchema.index({ email: 1, isDeleted: 1 });
+employeeSchema.index({ username: 1, isDeleted: 1 });
 employeeSchema.index({ role: 1 });
 employeeSchema.index({ reportingManager: 1 });
 

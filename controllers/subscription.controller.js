@@ -5,7 +5,7 @@ const Transaction = require("../models/transaction.model");
 
 exports.purchaseSubscription = async (req, res) => {
   try {
-    const { plan, billingCycle, transactionId, amount } = req.body;
+    const { plan, billingCycle, transactionId, amount, status } = req.body;
 
     const subscription = await Subscription.findById(req.params.id);
     if (!subscription) {
@@ -17,6 +17,13 @@ exports.purchaseSubscription = async (req, res) => {
       return res.status(404).json({ message: "Plan not found or inactive" });
     }
 
+    // Validate transaction status
+    const allowedStatuses = ["Paid", "Failed", "Refunded"];
+    const transactionStatus = status || "Paid";
+    if (!allowedStatuses.includes(transactionStatus)) {
+      return res.status(400).json({ message: "Invalid transaction status" });
+    }
+
     // Create transaction
     await Transaction.create({
       user: req.user.id,
@@ -25,7 +32,7 @@ exports.purchaseSubscription = async (req, res) => {
       subscription: subscription._id,
       amount,
       billingCycle,
-      status: "Paid",
+      status: transactionStatus,
       transactionId,
     });
 

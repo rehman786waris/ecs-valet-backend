@@ -12,6 +12,10 @@ exports.createPropertyManager = async (req, res) => {
       return res.status(400).json({ message: "Password is required" });
     }
 
+    if (data.username) {
+      data.username = data.username.toLowerCase();
+    }
+
     const passwordHash = await hashPassword(password);
 
     const manager = await PropertyManager.create({
@@ -26,6 +30,7 @@ exports.createPropertyManager = async (req, res) => {
       data: {
         id: manager._id,
         name: manager.fullName,
+        username: manager.username,
         email: manager.email,
         role: manager.role,
         isEnabled: manager.isEnabled,
@@ -34,7 +39,9 @@ exports.createPropertyManager = async (req, res) => {
     });
   } catch (err) {
     if (err.code === 11000) {
-      return res.status(409).json({ message: "Email already exists" });
+      return res
+        .status(409)
+        .json({ message: "Email or username already exists" });
     }
     res.status(500).json({ message: err.message });
   }
@@ -64,18 +71,13 @@ exports.propertyManagerLogin = async (req, res) => {
     manager.lastLogin = new Date();
     await manager.save();
 
-    const payload = {
-      id: manager._id,
-      role: manager.role,
-      tokenVersion: manager.tokenVersion,
-    };
-
     res.json({
-      accessToken: generateToken(payload),
-      refreshToken: generateRefreshToken(payload),
+      accessToken: generateToken(manager),
+      refreshToken: generateRefreshToken(manager),
       user: {
         id: manager._id,
         name: manager.fullName,
+        username: manager.username,
         email: manager.email,
         role: manager.role,
         permissions: manager.permissions,
@@ -174,6 +176,10 @@ exports.updatePropertyManager = async (req, res) => {
     ====================== */
     const blockedFields = ["passwordHash", "profileImage"];
     blockedFields.forEach((f) => delete req.body[f]);
+
+    if (req.body.username) {
+      req.body.username = req.body.username.toLowerCase();
+    }
 
     Object.assign(manager, req.body);
 

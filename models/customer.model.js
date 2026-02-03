@@ -9,6 +9,15 @@ const customerSchema = new mongoose.Schema(
       index: true,
     },
 
+    username: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+      unique: true,
+      index: true,
+    },
+
     email: {
       type: String,
       match: [/^\S+@\S+\.\S+$/, "Invalid email address"],

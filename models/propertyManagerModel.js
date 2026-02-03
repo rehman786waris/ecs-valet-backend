@@ -9,6 +9,15 @@ const propertyManagerSchema = new mongoose.Schema(
     firstName: { type: String, required: true, trim: true },
     lastName: { type: String, required: true, trim: true },
 
+    username: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+      unique: true,
+      index: true,
+    },
+
     email: {
       type: String,
       required: true,

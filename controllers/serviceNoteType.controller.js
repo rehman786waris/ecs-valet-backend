@@ -53,6 +53,8 @@ exports.getNoteTypes = async (req, res) => {
     const query = {};
     if (isActive !== undefined) {
       query.isActive = isActive === "true";
+    } else {
+      query.isActive = true;
     }
 
     const noteTypes = await ServiceNoteType.find(query)
@@ -211,7 +213,14 @@ exports.deleteNoteType = async (req, res) => {
       });
     }
 
+    if (!noteType.isActive) {
+      return res.status(400).json({
+        message: "Service note type already deleted",
+      });
+    }
+
     noteType.isActive = false;
+    noteType.deletedAt = new Date();
     noteType.updatedBy = req.user.id;
     await noteType.save();
 

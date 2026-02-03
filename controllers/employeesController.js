@@ -14,6 +14,7 @@ const pickEmployee = (employee) => {
     firstName: employee.firstName,
     lastName: employee.lastName,
     email: employee.email,
+    username: employee.username,
     phone: employee.phone,
     profileImage: employee.profileImage || null,
     role: employee.role,
@@ -38,6 +39,13 @@ exports.createEmployee = async (req, res) => {
       });
     }
 
+    if (!data.username) {
+      return res.status(400).json({
+        success: false,
+        message: "Username is required",
+      });
+    }
+
     const exists = await Employee.findOne({
       email: data.email.toLowerCase(),
       isDeleted: false,
@@ -50,9 +58,22 @@ exports.createEmployee = async (req, res) => {
       });
     }
 
+    const usernameExists = await Employee.findOne({
+      username: data.username.toLowerCase(),
+      isDeleted: false,
+    });
+
+    if (usernameExists) {
+      return res.status(409).json({
+        success: false,
+        message: "Username already exists",
+      });
+    }
+
     const employee = new Employee({
       ...data,
       email: data.email.toLowerCase(),
+      username: data.username.toLowerCase(),
       passwordHash: password, // hashed via schema middleware
       createdBy: req.user.id,
     });
@@ -216,6 +237,26 @@ exports.updateEmployee = async (req, res) => {
 
         req.body.role = roleDoc._id;
       }
+    }
+
+    /* ======================
+       USERNAME UNIQUENESS
+    ====================== */
+    if (req.body.username) {
+      const usernameExists = await Employee.findOne({
+        _id: { $ne: employee._id },
+        username: req.body.username.toLowerCase(),
+        isDeleted: false,
+      });
+
+      if (usernameExists) {
+        return res.status(409).json({
+          success: false,
+          message: "Username already exists",
+        });
+      }
+
+      req.body.username = req.body.username.toLowerCase();
     }
 
     /* ======================
