@@ -47,9 +47,16 @@ const messageBroadcastSchema = new mongoose.Schema(
     },
 
     createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Employee",
-      required: true,
+      id: {
+        type: mongoose.Schema.Types.ObjectId,
+        refPath: "createdBy.type",
+        required: true,
+      },
+      type: {
+        type: String,
+        enum: ["User", "PropertyManager", "Employee"],
+        required: true,
+      },
     },
   },
   { timestamps: true }

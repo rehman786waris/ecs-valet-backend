@@ -1,5 +1,6 @@
 const Employee = require("../models/employees/employee.model");
 const Role = require("../models/employees/role.model");
+const Property = require("../models/properties/property.model");
 const mongoose = require("mongoose");
 
 
@@ -350,4 +351,43 @@ exports.deleteEmployee = async (req, res) => {
     success: true,
     message: "Employee deleted successfully",
   });
+};
+
+/* ================= ASSIGN PROPERTY (ADMIN) ================= */
+exports.assignEmployeeProperty = async (req, res) => {
+  try {
+    const { propertyId } = req.body;
+    if (!propertyId) {
+      return res.status(400).json({ message: "propertyId is required" });
+    }
+
+    const property = await Property.findOne({
+      _id: propertyId,
+      isDeleted: false,
+    }).select("_id");
+    if (!property) {
+      return res.status(404).json({ message: "Property not found" });
+    }
+
+    const employee = await Employee.findOne({
+      _id: req.params.id,
+      isDeleted: false,
+    });
+    if (!employee) {
+      return res.status(404).json({ message: "Employee not found" });
+    }
+
+    employee.property = propertyId;
+    await employee.save();
+
+    return res.json({
+      message: "Employee property assigned successfully",
+      data: {
+        id: employee._id,
+        property: employee.property,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
 };

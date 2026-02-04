@@ -1,4 +1,5 @@
 const PropertyManager = require("../models/propertyManagerModel");
+const Property = require("../models/properties/property.model");
 const { hashPassword, comparePassword } = require("../utils/hashPassword");
 const { generateToken, generateRefreshToken } = require("../utils/generateToken");
 
@@ -216,4 +217,64 @@ exports.deletePropertyManager = async (req, res) => {
     return res.status(404).json({ message: "Property Manager not found" });
 
   res.json({ message: "Property Manager deleted successfully" });
+};
+
+/* =====================================================
+   ASSIGN PROPERTIES (ADMIN)
+===================================================== */
+exports.assignProperties = async (req, res) => {
+  try {
+    const { propertyIds } = req.body;
+    const ids = Array.isArray(propertyIds)
+      ? propertyIds
+      : req.body.propertyId
+        ? [req.body.propertyId]
+        : [];
+
+    if (!ids.length) {
+      return res.status(400).json({ message: "propertyIds are required" });
+    }
+
+    const manager = await PropertyManager.findOne({
+      _id: req.params.id,
+      isDeleted: false,
+    });
+    if (!manager) {
+      return res.status(404).json({ message: "Property Manager not found" });
+    }
+
+    const uniqueIds = [...new Set(ids.map((id) => id.toString()))];
+    const propertyCount = await Property.countDocuments({
+      _id: { $in: uniqueIds },
+      isDeleted: false,
+    });
+    if (propertyCount !== uniqueIds.length) {
+      return res.status(400).json({ message: "Invalid property selection" });
+    }
+
+    // Unassign properties that were previously linked to this PM
+    await Property.updateMany(
+      { propertyManager: manager._id, _id: { $nin: uniqueIds } },
+      { $set: { propertyManager: null } }
+    );
+
+    // Assign new properties to this PM
+    await Property.updateMany(
+      { _id: { $in: uniqueIds } },
+      { $set: { propertyManager: manager._id } }
+    );
+
+    manager.properties = uniqueIds;
+    await manager.save();
+
+    return res.json({
+      message: "Properties assigned successfully",
+      data: {
+        id: manager._id,
+        properties: manager.properties,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
 };

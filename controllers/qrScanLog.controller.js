@@ -1,5 +1,7 @@
 const QrScanLog = require("../models/properties/qrScanLog.model");
 const BinTag = require("../models/properties/binTag.model");
+const RecycleReport = require("../models/reports/recycleReport.model");
+const Property = require("../models/properties/property.model");
 
 /* =====================================================
    CREATE SCAN LOG (AUTO – MOBILE SCAN)
@@ -12,9 +14,27 @@ exports.createScanLog = async (req, res) => {
       return res.status(400).json({ message: "Barcode is required" });
     }
 
+    let companyId = req.user.company;
+    if (!companyId && req.userType === "EMPLOYEE") {
+      // Employee doesn't store company directly; infer via property
+      const Property = require("../models/properties/property.model");
+      if (!req.user.property) {
+        return res
+          .status(400)
+          .json({ message: "Employee property is not assigned" });
+      }
+      const property = await Property.findById(req.user.property).select(
+        "company"
+      );
+      if (!property) {
+        return res.status(404).json({ message: "Property not found" });
+      }
+      companyId = property.company;
+    }
+
     const binTag = await BinTag.findOne({
       barcode,
-      company: req.user.company,
+      company: companyId,
       status: "Active",
       isDeleted: false,
     }).populate("property", "propertyName");
@@ -24,7 +44,7 @@ exports.createScanLog = async (req, res) => {
     }
 
     const scanLog = await QrScanLog.create({
-      company: req.user.company,
+      company: companyId,
       binTag: binTag._id,
       scannedBy: req.user._id,
       location,
@@ -40,6 +60,32 @@ exports.createScanLog = async (req, res) => {
     binTag.lastScannedAt = new Date();
     binTag.lastScannedBy = req.user._id;
     await binTag.save();
+
+    const property = await Property.findById(binTag.property).select(
+      "address propertyType"
+    );
+    const addressObj = property?.address || {};
+    const addressParts = [
+      addressObj.street,
+      addressObj.city,
+      addressObj.state,
+      addressObj.zip,
+    ].filter(Boolean);
+    const addressString = addressParts.join(", ");
+    const status =
+      binTag.type === "Route Checkpoint"
+        ? "Route Check Point"
+        : "Violation Reported";
+
+    await RecycleReport.create({
+      property: binTag.property,
+      propertySnapshot: addressString || null,
+      scanDate: scanLog.scannedAt,
+      recycle: binTag.type !== "Route Checkpoint",
+      contaminated: false,
+      status,
+      scannedBy: req.user._id,
+    });
 
     res.status(201).json({
       message: "QR scan logged successfully",

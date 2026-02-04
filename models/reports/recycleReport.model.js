@@ -10,8 +10,8 @@ const recycleReportSchema = new mongoose.Schema(
     },
 
     propertySnapshot: {
-      address: String,
-      type: String,
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
     },
 
     scanDate: {

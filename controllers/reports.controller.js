@@ -10,6 +10,28 @@ const RecycleReport = require("../models/reports/recycleReport.model");
 const ServiceAlertLog = require("../models/reports/serviceAlertLog.model");
 const TaskLog = require("../models/reports/taskLog.model");
 const EmployeeClockLog = require("../models/reports/employeeClockLog.model");
+const Property = require("../models/properties/property.model");
+
+const resolvePropertyIdsForReport = async (req) => {
+  if (req.userType === "EMPLOYEE") {
+    return req.user?.property ? [req.user.property] : [];
+  }
+
+  if (req.userType === "PROPERTY_MANAGER") {
+    const managerId = req.user?._id;
+    if (!managerId) return [];
+    const properties = await Property.find({
+      $or: [
+        { propertyManager: managerId },
+        { _id: { $in: req.user.properties || [] } },
+      ],
+      isDeleted: false,
+    }).select("_id");
+    return properties.map((p) => p._id);
+  }
+
+  return null; // admin: no restriction
+};
 
 
 
@@ -551,6 +573,7 @@ exports.recycleReports = async (req, res) => {
       endDate,
       scannedBy,
       status,
+      propertyId,
       page = 1,
       limit = 10,
     } = req.query;
@@ -558,6 +581,32 @@ exports.recycleReports = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const match = {};
+
+    const scopedPropertyIds = await resolvePropertyIdsForReport(req);
+    if (Array.isArray(scopedPropertyIds)) {
+      if (!scopedPropertyIds.length) {
+        return res.json({
+          summary: {
+            totalRecycle: 0,
+            totalContaminated: 0,
+            totalViolations: 0,
+          },
+          page: Number(page),
+          limit: Number(limit),
+          totalRecords: 0,
+          totalPages: 0,
+          data: [],
+        });
+      }
+      match.property = { $in: scopedPropertyIds };
+    }
+
+    if (propertyId) {
+      if (match.property && !match.property.$in.map(String).includes(String(propertyId))) {
+        return res.status(403).json({ message: "Property access denied" });
+      }
+      match.property = propertyId;
+    }
 
     if (startDate && endDate) {
       match.scanDate = {
@@ -570,17 +619,30 @@ exports.recycleReports = async (req, res) => {
     if (status) match.status = status;
 
     /* ===== SUMMARY COUNTS ===== */
+    const summaryMatch = { ...match };
     const [totalRecycle, totalContaminated, totalViolations] =
       await Promise.all([
-        RecycleReport.countDocuments({ recycle: true }),
-        RecycleReport.countDocuments({ contaminated: true }),
-        RecycleReport.countDocuments({ status: "Violation Reported" }),
+        RecycleReport.countDocuments({ ...summaryMatch, recycle: true }),
+        RecycleReport.countDocuments({ ...summaryMatch, contaminated: true }),
+        RecycleReport.countDocuments({
+          ...summaryMatch,
+          status: "Violation Reported",
+        }),
       ]);
 
     /* ===== DATA LIST ===== */
     const pipeline = [
       { $match: match },
 
+      {
+        $lookup: {
+          from: "properties",
+          localField: "property",
+          foreignField: "_id",
+          as: "property",
+        },
+      },
+      { $unwind: "$property" },
       {
         $lookup: {
           from: "employees",
@@ -607,12 +669,26 @@ exports.recycleReports = async (req, res) => {
       {
         $project: {
           _id: 0,
-          property: "$propertySnapshot",
+          property: {
+            id: "$property._id",
+            name: "$property.propertyName",
+            address: "$property.address",
+          },
           scanDate: 1,
           recycle: 1,
           contaminated: 1,
           status: 1,
-          scanBy: "$scannedBy.name",
+          scanBy: {
+            $trim: {
+              input: {
+                $concat: [
+                  { $ifNull: ["$scannedBy.firstName", ""] },
+                  " ",
+                  { $ifNull: ["$scannedBy.lastName", ""] },
+                ],
+              },
+            },
+          },
         },
       }
     );

@@ -5,9 +5,24 @@ const propertyManager = require("../controllers/propertyManagerController");
 const adminManagerEmployeeAuth = require("../middlewares/adminManagerEmployeeAuth");
 const roleAuth = require("../middlewares/roleAuth");
 const uploadPropertyManagerAvatar = require("../middlewares/uploadPropertyManagerAvatarS3");
+const dashboardController = require("../controllers/propertyManagerDashboard.controller");
 
 // ---------------- PUBLIC ----------------
 router.post("/login", propertyManager.propertyManagerLogin);
+
+// ---------------- DASHBOARD (PM + ADMIN) ----------------
+router.get(
+  "/dashboard",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER", "admin", "super-admin"),
+  dashboardController.getDashboard
+);
+router.post(
+  "/dashboard",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER", "admin", "super-admin"),
+  dashboardController.getDashboard
+);
 
 // ---------------- ADMIN ----------------
 router.post(
@@ -30,6 +45,13 @@ router.put(
   adminManagerEmployeeAuth,
   uploadPropertyManagerAvatar.single("avatar"), // 👈 image field
   propertyManager.updatePropertyManager // ✅ FIXED
+);
+
+router.put(
+  "/:id/assign-properties",
+  adminManagerEmployeeAuth,
+  roleAuth("admin", "super-admin"),
+  propertyManager.assignProperties
 );
 
 module.exports = router;

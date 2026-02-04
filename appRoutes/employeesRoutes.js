@@ -36,4 +36,11 @@ router.put(
 router.patch("/:id/status", adminManagerEmployeeAuth, employeeController.toggleEmployeeStatus);
 router.delete("/:id", adminManagerEmployeeAuth, employeeController.deleteEmployee);
 
+router.put(
+  "/:id/assign-property",
+  adminManagerEmployeeAuth,
+  roleAuth("admin", "super-admin"),
+  employeeController.assignEmployeeProperty
+);
+
 module.exports = router;

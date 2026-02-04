@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const controller = require("../controllers/qrScanLog.controller");
 const adminAuth = require("../middlewares/adminAuthMiddleware");
+const adminManagerEmployeeAuth = require("../middlewares/adminManagerEmployeeAuth");
 //const mobileAuth = require("../middlewares/mobileAuthMiddleware");
 
 /* ======================
@@ -9,7 +10,7 @@ const adminAuth = require("../middlewares/adminAuthMiddleware");
 ====================== */
 
 // Mobile scan
-router.post("/scan", adminAuth, controller.createScanLog);
+router.post("/scan", adminManagerEmployeeAuth, controller.createScanLog);
 
 // Admin dashboard
 router.get("/", adminAuth, controller.getScanLogs);

@@ -1,11 +1,54 @@
 const Alert = require("../models/alerts/alert.model");
+const AlertReason = require("../models/alerts/alertReason.model");
+const Property = require("../models/properties/property.model");
 
 /* =====================================================
    CREATE ALERT
 ===================================================== */
 exports.createAlert = async (req, res) => {
   try {
-    const alert = await Alert.create(req.body);
+    const { title, reason, message, properties } = req.body;
+
+    if (!title || !reason || !message) {
+      return res
+        .status(400)
+        .json({ message: "Title, reason, and message are required" });
+    }
+
+    const propertyIds = Array.isArray(properties)
+      ? properties
+      : properties
+        ? [properties]
+        : [];
+
+    if (!propertyIds.length) {
+      return res.status(400).json({ message: "Properties are required" });
+    }
+
+    const reasonDoc = await AlertReason.findOne({
+      _id: reason,
+      isActive: true,
+    }).select("_id");
+    if (!reasonDoc) {
+      return res.status(400).json({ message: "Invalid alert reason" });
+    }
+
+    const uniquePropertyIds = [...new Set(propertyIds.map((id) => id.toString()))];
+    const propertyCount = await Property.countDocuments({
+      _id: { $in: uniquePropertyIds },
+      isDeleted: false,
+    });
+    if (propertyCount !== uniquePropertyIds.length) {
+      return res.status(400).json({ message: "Invalid property selection" });
+    }
+
+    const alert = await Alert.create({
+      title,
+      reason,
+      message,
+      properties: uniquePropertyIds,
+      createdBy: req.user._id,
+    });
 
     // mark as sent (or handle async sending later)
     alert.sendStatus = "Sent";
@@ -31,29 +74,44 @@ exports.getAlerts = async (req, res) => {
   try {
     const { page = 1, limit = 10, search = "", reason, status } = req.query;
 
-    const query = { isActive: true };
+    const baseQuery = { isActive: true };
 
-    if (reason) query.reason = reason;
-    if (status) query.sendStatus = status;
+    if (reason) baseQuery.reason = reason;
 
     if (search) {
-      query.$or = [{ title: { $regex: search, $options: "i" } }];
+      baseQuery.$or = [{ title: { $regex: search, $options: "i" } }];
     }
 
-    const alerts = await Alert.find(query)
-      .populate("reason", "name")
-      .populate("properties", "name")
-      .populate("createdBy", "name")
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
+    const query = { ...baseQuery };
+    if (status) query.sendStatus = status;
 
-    const total = await Alert.countDocuments(query);
+    const [alerts, total, totalSent, totalPending, totalFailed] =
+      await Promise.all([
+        Alert.find(query)
+          .populate("reason", "name")
+          .populate("properties", "name")
+          .populate("createdBy", "name")
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(Number(limit)),
+        Alert.countDocuments(query),
+        Alert.countDocuments({ ...baseQuery, sendStatus: "Sent" }),
+        Alert.countDocuments({ ...baseQuery, sendStatus: "Pending" }),
+        Alert.countDocuments({ ...baseQuery, sendStatus: "Failed" }),
+      ]);
+
+    const totalAll = totalSent + totalPending + totalFailed;
 
     return res.status(200).json({
       total,
       page: Number(page),
       limit: Number(limit),
+      counters: {
+        total: totalAll,
+        sent: totalSent,
+        pending: totalPending,
+        failed: totalFailed,
+      },
       data: alerts,
     });
   } catch (error) {
