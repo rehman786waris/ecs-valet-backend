@@ -9,6 +9,7 @@ const Checkpoint = require("../models/reports/checkpoint.model");
 const RecycleReport = require("../models/reports/recycleReport.model");
 const ServiceAlertLog = require("../models/reports/serviceAlertLog.model");
 const TaskLog = require("../models/reports/taskLog.model");
+const Task = require("../models/tasks/task.model");
 const EmployeeClockLog = require("../models/reports/employeeClockLog.model");
 const Property = require("../models/properties/property.model");
 
@@ -731,68 +732,87 @@ exports.taskStatusReport = async (req, res) => {
     const skip = (page - 1) * limit;
     const match = {};
 
-    if (propertyId) match.property = propertyId;
-    if (scannedBy) match.scannedBy = scannedBy;
+    const scopedPropertyIds = await resolvePropertyIdsForReport(req);
+    if (Array.isArray(scopedPropertyIds)) {
+      if (!scopedPropertyIds.length) {
+        return res.json({
+          page: Number(page),
+          limit: Number(limit),
+          totalRecords: 0,
+          totalPages: 0,
+          data: [],
+        });
+      }
+      match.property = { $in: scopedPropertyIds };
+    }
+
+    if (propertyId) {
+      if (
+        match.property &&
+        !match.property.$in.map(String).includes(String(propertyId))
+      ) {
+        return res.status(403).json({ message: "Property access denied" });
+      }
+      match.property = propertyId;
+    }
+
+    if (scannedBy) match.taskOwner = scannedBy;
 
     if (startDate && endDate) {
-      match.completedAt = {
+      match.startDate = {
         $gte: new Date(startDate),
         $lte: new Date(endDate),
       };
     }
 
-    if (hasMedia === "true") match.mediaCount = { $gt: 0 };
-    if (hasMedia === "false") match.mediaCount = 0;
+    if (hasMedia === "true") match.photoRequired = true;
+    if (hasMedia === "false") match.photoRequired = false;
 
-    const pipeline = [
-      { $match: match },
+    const totalRecords = await Task.countDocuments(match);
 
-      {
-        $lookup: {
-          from: "tasks",
-          localField: "task",
-          foreignField: "_id",
-          as: "task",
-        },
-      },
-      { $unwind: { path: "$task", preserveNullAndEmptyArrays: true } },
+    const tasks = await Task.find(match)
+      .populate("property", "propertyName address")
+      .populate("taskOwner", "firstName lastName")
+      .sort({ startDate: -1 })
+      .skip(Number(skip))
+      .limit(Number(limit))
+      .lean();
 
-      {
-        $lookup: {
-          from: "employees",
-          localField: "scannedBy",
-          foreignField: "_id",
-          as: "scannedBy",
-        },
-      },
-      { $unwind: { path: "$scannedBy", preserveNullAndEmptyArrays: true } },
-    ];
+    const taskIds = tasks.map((t) => t._id);
+    const taskLogs = await TaskLog.find({ task: { $in: taskIds } })
+      .populate("scannedBy", "firstName lastName")
+      .lean();
 
-    const totalRecords =
-      (
-        await TaskLog.aggregate([
-          ...pipeline,
-          { $count: "count" },
-        ])
-      )[0]?.count || 0;
-
-    pipeline.push(
-      { $sort: { completedAt: -1 } },
-      { $skip: Number(skip) },
-      { $limit: Number(limit) },
-      {
-        $project: {
-          _id: 0,
-          task: "$task.title",
-          property: "$propertySnapshot.address",
-          completionDate: "$completedAt",
-          scanBy: "$scannedBy.name",
-          media: "$mediaCount",
-        },
+    const logByTaskId = {};
+    taskLogs.forEach((log) => {
+      const key = log.task.toString();
+      if (!logByTaskId[key]) {
+        logByTaskId[key] = log;
       }
-    );
+    });
 
-    const data = await TaskLog.aggregate(pipeline);
+    const data = tasks.map((t) => {
+      const log = logByTaskId[t._id.toString()];
+      const scanner = log?.scannedBy
+        ? `${log.scannedBy.firstName || ""} ${log.scannedBy.lastName || ""}`.trim()
+        : null;
+
+      return {
+        task: t.title,
+        property: t.property
+          ? {
+              id: t.property._id,
+              name: t.property.propertyName,
+              address: t.property.address,
+            }
+          : null,
+        completionDate: log?.completedAt || t.completedAt,
+        date: t.startDate,
+        scanBy: scanner,
+        media: log?.mediaCount ?? t.photoRequired,
+        status: t.status,
+      };
+    });
 
     res.json({
       page: Number(page),

@@ -11,7 +11,7 @@ router.get("/service-report", adminAuth, controller.serviceReport);
 router.get( "/property-checkin-checkout-log", adminAuth, controller.propertyCheckInOutLog);
 router.get("/service-alerts-log", adminAuth, controller.serviceAlertsLog);
 router.get("/recycle-reports", adminManagerEmployeeAuth, controller.recycleReports);
-router.get("/task-status-report", adminAuth, controller.taskStatusReport);
+router.get("/task-status-report", adminManagerEmployeeAuth, controller.taskStatusReport);
 router.get("/employee-clock-in-out-log", adminAuth, controller.employeeClockInOutLog);
 
 
