@@ -106,9 +106,16 @@ const employeeSchema = new mongoose.Schema(
     isDeleted: { type: Boolean, default: false },
 
     createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User", // Admin
-      required: true,
+      id: {
+        type: mongoose.Schema.Types.ObjectId,
+        refPath: "createdBy.type",
+        required: true,
+      },
+      type: {
+        type: String,
+        enum: ["User", "PropertyManager", "Employee"],
+        required: true,
+      },
     },
   },
   { timestamps: true }

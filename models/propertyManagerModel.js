@@ -86,9 +86,16 @@ const propertyManagerSchema = new mongoose.Schema(
 
     // Audit
     createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+      id: {
+        type: mongoose.Schema.Types.ObjectId,
+        refPath: "createdBy.type",
+        required: true,
+      },
+      type: {
+        type: String,
+        enum: ["User", "PropertyManager", "Employee"],
+        required: true,
+      },
     },
   },
   { timestamps: true, toJSON: { virtuals: true } }

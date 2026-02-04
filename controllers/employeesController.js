@@ -70,12 +70,19 @@ exports.createEmployee = async (req, res) => {
       });
     }
 
+    const createdByType =
+      req.userType === "PROPERTY_MANAGER"
+        ? "PropertyManager"
+        : req.userType === "EMPLOYEE"
+          ? "Employee"
+          : "User";
+
     const employee = new Employee({
       ...data,
       email: data.email.toLowerCase(),
       username: data.username.toLowerCase(),
       passwordHash: password, // hashed via schema middleware
-      createdBy: req.user.id,
+      createdBy: { id: req.user.id, type: createdByType },
     });
 
     await employee.save();

@@ -18,11 +18,18 @@ exports.createPropertyManager = async (req, res) => {
 
     const passwordHash = await hashPassword(password);
 
+    const createdByType =
+      req.userType === "PROPERTY_MANAGER"
+        ? "PropertyManager"
+        : req.userType === "EMPLOYEE"
+          ? "Employee"
+          : "User";
+
     const manager = await PropertyManager.create({
       ...data,
       email: data.email.toLowerCase(),
       passwordHash,
-      createdBy: req.user._id,
+      createdBy: { id: req.user._id, type: createdByType },
     });
 
     res.status(201).json({
