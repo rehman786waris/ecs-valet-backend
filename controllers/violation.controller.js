@@ -1,5 +1,7 @@
+const mongoose = require("mongoose");
 const Violation = require("../models/violations/violation.model");
 const TopViolator = require("../models/violations/topViolator.model");
+const Property = require("../models/properties/property.model");
 
 const User = require("../models/userModel");
 
@@ -86,12 +88,38 @@ exports.getViolations = async (req, res) => {
     } = req.query;
 
     const query = {
-      company: req.user.company,
       isDeleted: false,
     };
 
+    if (req.user?.company) {
+      query.company = req.user.company;
+    }
+
+    // ================= PROPERTY ACCESS CONTROL =================
+    if (req.userType === "PROPERTY_MANAGER") {
+      const allowedProperties = (req.user.properties || []).map((id) => String(id));
+      if (allowedProperties.length === 0) {
+        return res.status(403).json({ message: "No properties assigned" });
+      }
+      if (property && !allowedProperties.includes(String(property))) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      query.property = property || { $in: allowedProperties };
+    }
+
+    if (req.userType === "EMPLOYEE") {
+      const employeeProperty = req.user.property ? String(req.user.property) : null;
+      if (!employeeProperty) {
+        return res.status(403).json({ message: "No property assigned" });
+      }
+      if (property && String(property) !== employeeProperty) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      query.property = property || employeeProperty;
+    }
+
     if (status) query.status = status;
-    if (property) query.property = property;
+    if (property && !query.property) query.property = property;
     if (rule) query.rule = rule;
     if (action) query.action = action;
 
@@ -123,6 +151,7 @@ exports.getViolations = async (req, res) => {
     }
 
     const violations = await Violation.find(query)
+      .select("+images")
       .populate("company", "companyName") // ✅ ADDED
       .populate("user", "firstName lastName")
       .populate("property", "name address")
@@ -160,6 +189,7 @@ exports.getViolationById = async (req, res) => {
       company: req.user.company,
       isDeleted: false,
     })
+      .select("+images")
       .populate("user")
       .populate("property")
       .populate("rule")
@@ -319,22 +349,64 @@ exports.getTopViolators = async (req, res) => {
       period = "all",          // daily | weekly | monthly | all
     } = req.query;
 
-    const companyId = req.user.company; // tenant isolation
+    const toObjectIds = (ids) =>
+      (ids || [])
+        .map((id) => (mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null))
+        .filter(Boolean);
+
+    let companyIds = [];
+    let allowedPropertyIds = null;
+    if (req.user?.company) {
+      companyIds = [req.user.company];
+    } else if (req.userType === "PROPERTY_MANAGER") {
+      let propertyIds = req.user.properties || [];
+      if (!propertyIds.length) {
+        const managedProps = await Property.find({
+          propertyManager: req.user._id,
+        }).select("_id");
+        propertyIds = managedProps.map((p) => p._id);
+      }
+
+      allowedPropertyIds = toObjectIds(propertyIds);
+
+      if (propertyIds.length) {
+        const propertyCompanies = await Property.distinct("company", {
+          _id: { $in: propertyIds },
+        });
+        companyIds = propertyCompanies.map((id) => String(id));
+      }
+
+      if (!companyIds.length && propertyIds.length) {
+        const violationCompanies = await Violation.distinct("company", {
+          property: { $in: propertyIds },
+          isDeleted: false,
+        });
+        companyIds = violationCompanies.map((id) => String(id));
+      }
+    }
+
+    if (!companyIds.length) {
+      return res.status(403).json({ message: "No properties assigned" });
+    }
+
+    const companyObjectIds = toObjectIds(companyIds);
+    if (!companyObjectIds.length) {
+      return res.status(403).json({ message: "No properties assigned" });
+    }
 
     // ================= FETCH TOP VIOLATORS =================
     const topViolators = await TopViolator.find({
-      company: companyId,
+      company: { $in: companyObjectIds },
       period,
     })
       .sort({ totalViolations: -1 })
       .limit(Number(top))
       .select("binTagId buildingName totalViolations propertyLabel");
 
-    // ================= TOTAL VIOLATION COUNT =================
-    const totalAgg = await TopViolator.aggregate([
+    let totalAgg = await TopViolator.aggregate([
       {
         $match: {
-          company: companyId,
+          company: { $in: companyObjectIds },
           period,
         },
       },
@@ -345,6 +417,83 @@ exports.getTopViolators = async (req, res) => {
         },
       },
     ]);
+
+    // ================= FALLBACK: COMPUTE FROM VIOLATIONS =================
+    if (topViolators.length === 0) {
+      const match = {
+        isDeleted: false,
+        company: { $in: companyObjectIds },
+      };
+
+      if (allowedPropertyIds?.length) {
+        match.property = { $in: allowedPropertyIds };
+      }
+
+      if (period === "daily") {
+        const start = new Date();
+        start.setUTCHours(0, 0, 0, 0);
+        match.createdAt = { $gte: start };
+      } else if (period === "weekly") {
+        const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        match.createdAt = { $gte: start };
+      } else if (period === "monthly") {
+        const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        match.createdAt = { $gte: start };
+      }
+
+      const computedTop = await Violation.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: {
+              binTagId: "$binTagId",
+              building: "$building",
+              property: "$property",
+            },
+            totalViolations: { $sum: 1 },
+          },
+        },
+        { $sort: { totalViolations: -1 } },
+        { $limit: Number(top) },
+        {
+          $lookup: {
+            from: "properties",
+            localField: "_id.property",
+            foreignField: "_id",
+            as: "property",
+          },
+        },
+        { $unwind: { path: "$property", preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            _id: 0,
+            binTagId: "$_id.binTagId",
+            buildingName: "$_id.building",
+            totalViolations: 1,
+            propertyLabel: "$property.propertyName",
+          },
+        },
+      ]);
+
+      const totalComputed = await Violation.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+          },
+        },
+      ]);
+
+      return res.json({
+        data: computedTop,
+        summary: {
+          totalViolations: totalComputed[0]?.total || 0,
+          period,
+          top: Number(top),
+        },
+      });
+    }
 
     res.json({
       data: topViolators,
@@ -361,4 +510,3 @@ exports.getTopViolators = async (req, res) => {
     });
   }
 };
-

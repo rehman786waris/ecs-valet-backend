@@ -1,10 +1,28 @@
 const Resident = require("../models/residents/resident.model");
 
+const buildPropertyManagerAccessFilter = (req) => {
+  const allowedProperties = (req.user?.properties || []).map((id) => String(id));
+  return {
+    allowedProperties,
+    accessFilter: {
+      $or: [
+        { property: { $in: allowedProperties } },
+        { createdBy: req.user?._id },
+      ],
+    },
+  };
+};
+
 /* =====================================================
    CREATE RESIDENT
 ===================================================== */
 exports.createResident = async (req, res) => {
   try {
+    const { allowedProperties } = buildPropertyManagerAccessFilter(req);
+    if (req.body.property && !allowedProperties.includes(String(req.body.property))) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
     const resident = await Resident.create({
       ...req.body,
       createdBy: req.user._id, // from auth middleware
@@ -26,17 +44,30 @@ exports.getResidents = async (req, res) => {
   try {
     const { property, search, isActive = true } = req.query;
 
+    const { allowedProperties, accessFilter } = buildPropertyManagerAccessFilter(req);
     const filter = { isActive };
+    const and = [accessFilter];
 
-    if (property) filter.property = property;
+    if (property) {
+      if (!allowedProperties.includes(String(property))) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      filter.property = property;
+    }
 
     if (search) {
-      filter.$or = [
-        { firstName: new RegExp(search, "i") },
-        { lastName: new RegExp(search, "i") },
-        { email: new RegExp(search, "i") },
-        { unit: new RegExp(search, "i") },
-      ];
+      and.push({
+        $or: [
+          { firstName: new RegExp(search, "i") },
+          { lastName: new RegExp(search, "i") },
+          { email: new RegExp(search, "i") },
+          { unit: new RegExp(search, "i") },
+        ],
+      });
+    }
+
+    if (and.length > 0) {
+      filter.$and = and;
     }
 
     const residents = await Resident.find(filter)
@@ -55,7 +86,8 @@ exports.getResidents = async (req, res) => {
 ===================================================== */
 exports.getResidentById = async (req, res) => {
   try {
-    const resident = await Resident.findById(req.params.id)
+    const { accessFilter } = buildPropertyManagerAccessFilter(req);
+    const resident = await Resident.findOne({ _id: req.params.id, ...accessFilter })
       .populate("property")
       .populate("building");
 
@@ -73,8 +105,13 @@ exports.getResidentById = async (req, res) => {
 ===================================================== */
 exports.updateResident = async (req, res) => {
   try {
-    const resident = await Resident.findByIdAndUpdate(
-      req.params.id,
+    const { allowedProperties, accessFilter } = buildPropertyManagerAccessFilter(req);
+    if (req.body.property && !allowedProperties.includes(String(req.body.property))) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const resident = await Resident.findOneAndUpdate(
+      { _id: req.params.id, ...accessFilter },
       req.body,
       { new: true }
     );
@@ -96,8 +133,9 @@ exports.updateResident = async (req, res) => {
 ===================================================== */
 exports.deleteResident = async (req, res) => {
   try {
-    const resident = await Resident.findByIdAndUpdate(
-      req.params.id,
+    const { accessFilter } = buildPropertyManagerAccessFilter(req);
+    const resident = await Resident.findOneAndUpdate(
+      { _id: req.params.id, ...accessFilter },
       { isActive: false },
       { new: true }
     );

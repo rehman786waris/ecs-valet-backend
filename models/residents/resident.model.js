@@ -32,7 +32,6 @@ const residentSchema = new mongoose.Schema(
     property: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Property",
-      required: true,
       index: true,
     },
 
@@ -44,7 +43,6 @@ const residentSchema = new mongoose.Schema(
 
     unit: {
       type: String,
-      required: true,
       trim: true,
       index: true,
     },
@@ -67,9 +65,19 @@ const residentSchema = new mongoose.Schema(
       index: true,
     },
 
+    select: {
+      type: Boolean,
+      default: false,
+    },
+
+    selectAll: {
+      type: Boolean,
+      default: false,
+    },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "PropertyManager",
       required: true,
     },
   },

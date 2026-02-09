@@ -2,25 +2,51 @@ const express = require("express");
 const router = express.Router();
 
 const violationTemplateController = require("../controllers/violationTemplate.controller");
-const adminAuth = require("../middlewares/adminAuthMiddleware");
+const adminManagerEmployeeAuth = require("../middlewares/adminManagerEmployeeAuth");
+const roleAuth = require("../middlewares/roleAuth");
 
 /* =====================================================
    VIOLATION TEMPLATE ROUTES
 ===================================================== */
 
 // Create template
-router.post("/", adminAuth, violationTemplateController.createTemplate);
+router.post(
+  "/",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER", "admin"),
+  violationTemplateController.createTemplate
+);
 
 // Get all templates
-router.get("/", adminAuth, violationTemplateController.getTemplates);
+router.get(
+  "/",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER", "admin"),
+  violationTemplateController.getTemplates
+);
 
 // Get single template
-router.get("/:id", adminAuth, violationTemplateController.getTemplateById);
+router.get(
+  "/:id",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER", "admin"),
+  violationTemplateController.getTemplateById
+);
 
 // Update template
-router.put("/:id", adminAuth, violationTemplateController.updateTemplate);
+router.put(
+  "/:id",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER", "admin"),
+  violationTemplateController.updateTemplate
+);
 
 // Soft delete template
-router.delete("/:id", adminAuth, violationTemplateController.deleteTemplate);
+router.delete(
+  "/:id",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER", "admin"),
+  violationTemplateController.deleteTemplate
+);
 
 module.exports = router;

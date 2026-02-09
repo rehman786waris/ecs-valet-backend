@@ -2,20 +2,46 @@ const express = require("express");
 const router = express.Router();
 
 const residentController = require("../controllers/resident.controller");
-const authMiddleware = require("../middlewares/authMiddleware");
+const adminManagerEmployeeAuth = require("../middlewares/adminManagerEmployeeAuth");
+const roleAuth = require("../middlewares/roleAuth");
 
 /* ===============================
    RESIDENT ROUTES
 ================================ */
 
-router.post("/", authMiddleware, residentController.createResident);
+router.post(
+  "/",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER"),
+  residentController.createResident
+);
 
-router.get("/", authMiddleware, residentController.getResidents);
+router.get(
+  "/",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER"),
+  residentController.getResidents
+);
 
-router.get("/:id", authMiddleware, residentController.getResidentById);
+router.get(
+  "/:id",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER"),
+  residentController.getResidentById
+);
 
-router.put("/:id", authMiddleware, residentController.updateResident);
+router.put(
+  "/:id",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER"),
+  residentController.updateResident
+);
 
-router.delete("/:id", authMiddleware, residentController.deleteResident);
+router.delete(
+  "/:id",
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER"),
+  residentController.deleteResident
+);
 
 module.exports = router;

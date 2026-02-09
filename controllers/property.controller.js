@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Property = require("../models/properties/property.model");
 const Building = require("../models/buildings.model");
 const BinTag = require("../models/properties/binTag.model");
@@ -124,10 +125,32 @@ exports.getProperties = async (req, res) => {
     const { page = 1, limit = 10, search, isActive, customer, propertyManager } =
       req.query;
 
+    const toObjectIds = (ids) =>
+      (ids || [])
+        .map((id) =>
+          mongoose.Types.ObjectId.isValid(id)
+            ? new mongoose.Types.ObjectId(id)
+            : null
+        )
+        .filter(Boolean);
+
     const query = {
-      company: req.user.company,
       isDeleted: false,
     };
+
+    if (req.user?.company) {
+      query.company = req.user.company;
+    } else if (req.userType === "PROPERTY_MANAGER") {
+      const propertyIds = req.user.properties?.length
+        ? req.user.properties
+        : await Property.find({ propertyManager: req.user._id }).distinct("_id");
+      query._id = { $in: toObjectIds(propertyIds) };
+    } else if (req.userType === "EMPLOYEE") {
+      if (!req.user.property) {
+        return res.status(403).json({ success: false, message: "No property assigned" });
+      }
+      query._id = toObjectIds([req.user.property])[0];
+    }
 
     if (isActive !== undefined) query.isActive = isActive === "true";
     if (customer) query.customer = customer;

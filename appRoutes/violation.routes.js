@@ -3,6 +3,8 @@ const router = express.Router();
 
 const violationController = require("../controllers/violation.controller");
 const adminAuth = require("../middlewares/adminAuthMiddleware");
+const adminManagerEmployeeAuth = require("../middlewares/adminManagerEmployeeAuth");
+const roleAuth = require("../middlewares/roleAuth");
 const uploadViolationImages = require("../middlewares/uploadViolationImages");
 
 /* =====================================================
@@ -26,12 +28,13 @@ router.put(
 );
 
 // LIST
-router.get("/", adminAuth, violationController.getViolations);
+router.get("/", adminManagerEmployeeAuth, violationController.getViolations);
 
 // ✅ STATIC ROUTE — MUST COME BEFORE :id
 router.get(
   "/top-violators",
-  adminAuth,
+  adminManagerEmployeeAuth,
+  roleAuth("PROPERTY_MANAGER", "admin"),
   violationController.getTopViolators
 );
 
