@@ -17,13 +17,18 @@ exports.createScanLog = async (req, res) => {
     let companyId = req.user.company;
     if (!companyId && req.userType === "EMPLOYEE") {
       // Employee doesn't store company directly; infer via property
-      const Property = require("../models/properties/property.model");
-      if (!req.user.property) {
+      const employeeProperties =
+        Array.isArray(req.user.properties) && req.user.properties.length
+          ? req.user.properties
+          : req.user.property
+            ? [req.user.property]
+            : [];
+      if (!employeeProperties.length) {
         return res
           .status(400)
           .json({ message: "Employee property is not assigned" });
       }
-      const property = await Property.findById(req.user.property).select(
+      const property = await Property.findById(employeeProperties[0]).select(
         "company"
       );
       if (!property) {

@@ -6,6 +6,16 @@ const mongoose = require("mongoose");
 
 const { generateToken, generateRefreshToken } = require("../utils/generateToken");
 
+const normalizeEmployeeProperties = (payload) => {
+  if (Array.isArray(payload.properties)) {
+    payload.property = payload.properties[0] || null;
+    return;
+  }
+  if (payload.property) {
+    payload.properties = [payload.property];
+  }
+};
+
 /* ================= PICK EMPLOYEE (SAFE RESPONSE) ================= */
 const pickEmployee = (employee) => {
   if (!employee) return null;
@@ -19,7 +29,8 @@ const pickEmployee = (employee) => {
     phone: employee.phone,
     profileImage: employee.profileImage || null,
     role: employee.role,
-    property: employee.property,
+    property: employee.property || employee.properties?.[0] || null,
+    properties: employee.properties || (employee.property ? [employee.property] : []),
     reportingManager: employee.reportingManager,
     isActive: employee.isActive,
     lastLogin: employee.lastLogin,
@@ -85,6 +96,7 @@ exports.createEmployee = async (req, res) => {
       passwordHash: password, // hashed via schema middleware
       createdBy: { id: req.user.id, type: createdByType },
     });
+    normalizeEmployeeProperties(employee);
 
     await employee.save();
 
@@ -157,6 +169,7 @@ exports.loginEmployee = async (req, res) => {
 exports.getEmployees = async (req, res) => {
   const employees = await Employee.find({ isDeleted: false })
     .populate("property", "name")
+    .populate("properties", "name")
     .populate("role", "displayName")
     .populate("reportingManager", "firstName lastName")
     .select("-passwordHash")
@@ -175,6 +188,7 @@ exports.getEmployeeById = async (req, res) => {
     isDeleted: false,
   })
     .populate("property")
+    .populate("properties")
     .populate("role")
     .populate("reportingManager")
     .select("-passwordHash");
@@ -286,6 +300,7 @@ exports.updateEmployee = async (req, res) => {
     blockedFields.forEach((f) => delete req.body[f]);
 
     Object.assign(employee, req.body);
+    normalizeEmployeeProperties(employee);
 
     if (req.body.password) {
       employee.passwordHash = req.body.password;
@@ -353,20 +368,25 @@ exports.deleteEmployee = async (req, res) => {
   });
 };
 
-/* ================= ASSIGN PROPERTY (ADMIN) ================= */
+/* ================= ASSIGN PROPERTIES (ADMIN) ================= */
 exports.assignEmployeeProperty = async (req, res) => {
   try {
-    const { propertyId } = req.body;
-    if (!propertyId) {
-      return res.status(400).json({ message: "propertyId is required" });
+    const ids = Array.isArray(req.body.propertyIds)
+      ? req.body.propertyIds
+      : req.body.propertyId
+        ? [req.body.propertyId]
+        : [];
+    if (!ids.length) {
+      return res.status(400).json({ message: "propertyIds are required" });
     }
+    const uniqueIds = [...new Set(ids.map(String))];
 
-    const property = await Property.findOne({
-      _id: propertyId,
+    const propertyCount = await Property.countDocuments({
+      _id: { $in: uniqueIds },
       isDeleted: false,
-    }).select("_id");
-    if (!property) {
-      return res.status(404).json({ message: "Property not found" });
+    });
+    if (propertyCount !== uniqueIds.length) {
+      return res.status(404).json({ message: "Invalid property selection" });
     }
 
     const employee = await Employee.findOne({
@@ -377,14 +397,16 @@ exports.assignEmployeeProperty = async (req, res) => {
       return res.status(404).json({ message: "Employee not found" });
     }
 
-    employee.property = propertyId;
+    employee.properties = uniqueIds;
+    employee.property = uniqueIds[0] || null;
     await employee.save();
 
     return res.json({
-      message: "Employee property assigned successfully",
+      message: "Employee properties assigned successfully",
       data: {
         id: employee._id,
         property: employee.property,
+        properties: employee.properties,
       },
     });
   } catch (err) {

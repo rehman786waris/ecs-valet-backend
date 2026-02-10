@@ -1,6 +1,31 @@
 const ServiceNote = require("../models/service/serviceNote.model");
 const ServiceNoteStatus = require("../models/service/serviceNoteStatus.model");
+const ServiceNoteSubject = require("../models/service/noteSubject.model");
+const User = require("../models/userModel");
+const Property = require("../models/properties/property.model");
 const mongoose = require("mongoose");
+
+const resolveAllowedPropertyIds = async (req) => {
+  if (req.userType === "PROPERTY_MANAGER") {
+    if (Array.isArray(req.user.properties) && req.user.properties.length) {
+      return req.user.properties;
+    }
+    const ids = await Property.find({
+      propertyManager: req.user._id,
+      isDeleted: false,
+    }).distinct("_id");
+    return ids;
+  }
+
+  if (req.userType === "EMPLOYEE") {
+    if (Array.isArray(req.user.properties) && req.user.properties.length) {
+      return req.user.properties;
+    }
+    return req.user.property ? [req.user.property] : [];
+  }
+
+  return null; // admin: unrestricted
+};
 
 /* =====================================================
    CREATE SERVICE NOTE (WITH IMAGES)
@@ -107,6 +132,17 @@ exports.getServiceNotes = async (req, res) => {
 
     const query = { isActive: true };
 
+    const allowedPropertyIds = await resolveAllowedPropertyIds(req);
+    if (Array.isArray(allowedPropertyIds)) {
+      if (!allowedPropertyIds.length) {
+        return res.status(403).json({ message: "No properties assigned" });
+      }
+      if (property && !allowedPropertyIds.map(String).includes(String(property))) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      query.property = property || { $in: allowedPropertyIds };
+    }
+
     /* ================= STATUS ================= */
     if (status) {
       if (mongoose.Types.ObjectId.isValid(status)) {
@@ -131,7 +167,7 @@ exports.getServiceNotes = async (req, res) => {
     }
 
     /* ================= PROPERTY ================= */
-    if (property) {
+    if (property && !query.property) {
       query.property = property;
     }
 
@@ -243,7 +279,16 @@ exports.getServiceNotes = async (req, res) => {
 ===================================================== */
 exports.getServiceNoteById = async (req, res) => {
   try {
-    const note = await ServiceNote.findById(req.params.id)
+    const allowedPropertyIds = await resolveAllowedPropertyIds(req);
+    const findQuery = { _id: req.params.id };
+    if (Array.isArray(allowedPropertyIds)) {
+      if (!allowedPropertyIds.length) {
+        return res.status(403).json({ message: "No properties assigned" });
+      }
+      findQuery.property = { $in: allowedPropertyIds };
+    }
+
+    const note = await ServiceNote.findOne(findQuery)
       .populate("user", "userName")
       .populate("property", "PropertyName")
       .populate("subject", "name")

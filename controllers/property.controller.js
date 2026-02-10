@@ -138,18 +138,26 @@ exports.getProperties = async (req, res) => {
       isDeleted: false,
     };
 
-    if (req.user?.company) {
-      query.company = req.user.company;
-    } else if (req.userType === "PROPERTY_MANAGER") {
+    if (req.userType === "PROPERTY_MANAGER") {
       const propertyIds = req.user.properties?.length
         ? req.user.properties
         : await Property.find({ propertyManager: req.user._id }).distinct("_id");
       query._id = { $in: toObjectIds(propertyIds) };
     } else if (req.userType === "EMPLOYEE") {
-      if (!req.user.property) {
-        return res.status(403).json({ success: false, message: "No property assigned" });
+      const employeePropertyIds =
+        Array.isArray(req.user.properties) && req.user.properties.length
+          ? req.user.properties
+          : req.user.property
+            ? [req.user.property]
+            : [];
+      if (!employeePropertyIds.length) {
+        return res
+          .status(403)
+          .json({ success: false, message: "No property assigned" });
       }
-      query._id = toObjectIds([req.user.property])[0];
+      query._id = { $in: toObjectIds(employeePropertyIds) };
+    } else if (req.user?.company) {
+      query.company = req.user.company;
     }
 
     if (isActive !== undefined) query.isActive = isActive === "true";

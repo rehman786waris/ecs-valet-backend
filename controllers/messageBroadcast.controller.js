@@ -23,8 +23,14 @@ const resolveCompanyId = async (req) => {
   }
 
   if (req.userType === "EMPLOYEE") {
-    if (!req.user.property) return null;
-    const property = await Property.findById(req.user.property).select(
+    const employeeProperties =
+      Array.isArray(req.user.properties) && req.user.properties.length
+        ? req.user.properties
+        : req.user.property
+          ? [req.user.property]
+          : [];
+    if (!employeeProperties.length) return null;
+    const property = await Property.findById(employeeProperties[0]).select(
       "company"
     );
     return property?.company || null;
@@ -64,7 +70,9 @@ exports.createMessageBroadcast = async (req, res) => {
     let recipients = [];
     if (recipientsInput.length) {
       const query = { _id: { $in: recipientsInput }, isDeleted: false };
-      if (propertyId) query.property = propertyId;
+      if (propertyId) {
+        query.$or = [{ property: propertyId }, { properties: propertyId }];
+      }
       const employees = await Employee.find(query).select(
         "_id email role property isActive"
       );
@@ -78,7 +86,7 @@ exports.createMessageBroadcast = async (req, res) => {
       }
     } else if (propertyId) {
       const employees = await Employee.find({
-        property: propertyId,
+        $or: [{ property: propertyId }, { properties: propertyId }],
         isDeleted: false,
         isActive: true,
       }).select("_id email role property");
@@ -94,14 +102,16 @@ exports.createMessageBroadcast = async (req, res) => {
     let companyId = property?.company;
     if (!companyId) {
       const firstEmployee = await Employee.findById(recipients[0]).select(
-        "property"
+        "property properties"
       );
-      if (!firstEmployee?.property) {
+      const firstPropertyId =
+        firstEmployee?.properties?.[0] || firstEmployee?.property || null;
+      if (!firstPropertyId) {
         return res
           .status(400)
           .json({ message: "Unable to resolve company for recipients" });
       }
-      const prop = await Property.findById(firstEmployee.property).select(
+      const prop = await Property.findById(firstPropertyId).select(
         "company"
       );
       companyId = prop?.company;
@@ -189,7 +199,7 @@ exports.getMessageBroadcasts = async (req, res) => {
     }
     if (propertyId) {
       const employeeIds = await Employee.find({
-        property: propertyId,
+        $or: [{ property: propertyId }, { properties: propertyId }],
         isDeleted: false,
       }).distinct("_id");
       if (!employeeIds.length) {

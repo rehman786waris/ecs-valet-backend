@@ -52,6 +52,13 @@ const employeeSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Property",
     },
+    // Prefer this for multi-property assignments
+    properties: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Property",
+      },
+    ],
 
     profileImage: {
       url: { type: String, trim: true },
@@ -149,5 +156,6 @@ employeeSchema.index({ email: 1, isDeleted: 1 });
 employeeSchema.index({ username: 1, isDeleted: 1 });
 employeeSchema.index({ role: 1 });
 employeeSchema.index({ reportingManager: 1 });
+employeeSchema.index({ properties: 1 });
 
 module.exports = mongoose.model("Employee", employeeSchema);

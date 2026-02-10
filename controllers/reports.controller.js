@@ -15,7 +15,13 @@ const Property = require("../models/properties/property.model");
 
 const resolvePropertyIdsForReport = async (req) => {
   if (req.userType === "EMPLOYEE") {
-    return req.user?.property ? [req.user.property] : [];
+    const ids =
+      Array.isArray(req.user?.properties) && req.user.properties.length
+        ? req.user.properties
+        : req.user?.property
+          ? [req.user.property]
+          : [];
+    return ids;
   }
 
   if (req.userType === "PROPERTY_MANAGER") {

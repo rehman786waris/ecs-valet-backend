@@ -108,14 +108,19 @@ exports.getViolations = async (req, res) => {
     }
 
     if (req.userType === "EMPLOYEE") {
-      const employeeProperty = req.user.property ? String(req.user.property) : null;
-      if (!employeeProperty) {
+      const employeeProperties =
+        Array.isArray(req.user.properties) && req.user.properties.length
+          ? req.user.properties.map((id) => String(id))
+          : req.user.property
+            ? [String(req.user.property)]
+            : [];
+      if (!employeeProperties.length) {
         return res.status(403).json({ message: "No property assigned" });
       }
-      if (property && String(property) !== employeeProperty) {
+      if (property && !employeeProperties.includes(String(property))) {
         return res.status(403).json({ message: "Access denied" });
       }
-      query.property = property || employeeProperty;
+      query.property = property || { $in: employeeProperties };
     }
 
     if (status) query.status = status;

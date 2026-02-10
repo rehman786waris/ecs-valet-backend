@@ -3,6 +3,7 @@ const router = express.Router();
 
 const serviceNoteController = require("../controllers/serviceNote.controller");
 const adminAuth = require("../middlewares/adminAuthMiddleware");
+const adminManagerEmployeeAuth = require("../middlewares/adminManagerEmployeeAuth");
 const uploadServiceNoteImages = require("../middlewares/uploadServiceNoteImages");
 
 /* =====================================================
@@ -16,9 +17,9 @@ router.post(
   serviceNoteController.createServiceNote
 );
 
-router.get("/", adminAuth, serviceNoteController.getServiceNotes);
+router.get("/", adminManagerEmployeeAuth, serviceNoteController.getServiceNotes);
 
-router.get("/:id", adminAuth, serviceNoteController.getServiceNoteById);
+router.get("/:id", adminManagerEmployeeAuth, serviceNoteController.getServiceNoteById);
 
 router.put(
   "/:id",
