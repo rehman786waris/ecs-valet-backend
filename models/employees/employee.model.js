@@ -73,7 +73,12 @@ const employeeSchema = new mongoose.Schema(
 
     reportingManager: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Employee",
+      refPath: "reportingManagerType",
+    },
+    reportingManagerType: {
+      type: String,
+      enum: ["Employee", "PropertyManager", "User"],
+      default: "Employee",
     },
 
     timeZone: {

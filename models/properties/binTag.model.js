@@ -46,6 +46,16 @@ const binTagSchema = new mongoose.Schema(
       uppercase: true,
       index: true,
     },
+    units: [
+      {
+        unitNumber: {
+          type: String,
+          trim: true,
+          uppercase: true,
+          required: true,
+        },
+      },
+    ],
 
     barcode: {
       type: String,

@@ -21,6 +21,7 @@ const generateBarcode = (propertyId, bIndex, uIndex) =>
 ===================================================== */
 exports.createProperty = async (req, res) => {
   try {
+    const currentUserId = req.user?._id || req.user?.id;
     const data = req.body;
 
     if (data.redundantRouteService !== undefined) {
@@ -30,22 +31,27 @@ exports.createProperty = async (req, res) => {
     const buildingsPayload = data.buildings
       ? JSON.parse(data.buildings)
       : [];
+    const propertyLogoFile = req.files?.propertyLogo?.[0];
 
     // 1️⃣ Property
     const property = await Property.create({
       ...data,
       company: req.user.company,
-      createdBy: req.user._id,
+      propertyLogo: propertyLogoFile?.location || data.propertyLogo,
+      createdBy: currentUserId,
       buildings: [],
     });
 
-    const files = req.files || [];
+    const files = Array.isArray(req.files)
+      ? req.files
+      : req.files?.images || [];
     let fileIndex = 0;
     const buildingIds = [];
 
     // 2️⃣ Buildings + BinTags
     for (let i = 0; i < buildingsPayload.length; i++) {
       const b = buildingsPayload[i];
+      const unitsPayload = Array.isArray(b.units) ? b.units : [];
 
       const images = [];
       const imageCount = Number(b.imageCount || 0);
@@ -57,10 +63,23 @@ exports.createProperty = async (req, res) => {
         }
       }
 
+      const numberOfUnits =
+        typeof b.numberOfUnits === "number"
+          ? b.numberOfUnits
+          : unitsPayload.length;
+
+      const units =
+        unitsPayload.length > 0
+          ? unitsPayload
+          : Array.from({ length: numberOfUnits }, (_, u) => ({
+            unitNumber: generateUnitNumber(i, u),
+          }));
+
       const building = await Building.create({
         property: property._id,
         name: b.name,
-        numberOfUnits: b.numberOfUnits,
+        numberOfUnits,
+        units,
         buildingOrder: b.buildingOrder || 0,
         address: b.address,
         images,
@@ -70,7 +89,7 @@ exports.createProperty = async (req, res) => {
 
       const binTags = [];
 
-      for (let u = 0; u < b.numberOfUnits; u++) {
+      for (let u = 0; u < numberOfUnits; u++) {
         const barcode = generateBarcode(property._id, i, u);
         const qrCodeImage = await generateAndUploadQRCode(barcode);
 
@@ -87,10 +106,11 @@ exports.createProperty = async (req, res) => {
             address: building.address,
           },
           unitNumber: generateUnitNumber(i, u),
+          units: [{ unitNumber: generateUnitNumber(i, u) }],
           barcode,
           qrCodeImage,
           type: "Bin",
-          createdBy: req.user._id,
+          createdBy: currentUserId,
         });
       }
 
@@ -243,6 +263,14 @@ exports.updateProperty = async (req, res) => {
       );
     }
 
+    if (req.body.violationReminder !== undefined) {
+      property.violationReminder = req.body.violationReminder;
+    }
+
+    if (req.files?.propertyLogo?.[0]?.location) {
+      property.propertyLogo = req.files.propertyLogo[0].location;
+    }
+
     const fields = [
       "customer",
       "propertyManager",
@@ -253,6 +281,8 @@ exports.updateProperty = async (req, res) => {
       "radiusMiles",
       "serviceAgreement",
       "serviceAlertSMS",
+      "propertyLogo",
+      "violationReminder",
       "isActive",
     ];
 

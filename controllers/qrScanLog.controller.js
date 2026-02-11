@@ -56,6 +56,7 @@ exports.createScanLog = async (req, res) => {
       snapshot: {
         propertyName: binTag.propertySnapshot?.propertyName,
         unitNumber: binTag.unitNumber,
+        units: binTag.unitNumber ? [{ unitNumber: binTag.unitNumber }] : [],
         barcode: binTag.barcode,
       },
     });

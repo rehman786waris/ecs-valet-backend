@@ -79,6 +79,11 @@ exports.propertyManagerLogin = async (req, res) => {
     manager.lastLogin = new Date();
     await manager.save();
 
+    const propertyIds = Array.isArray(manager.properties)
+      ? manager.properties
+      : [];
+    const propertyId = propertyIds.length === 1 ? propertyIds[0] : null;
+
     res.json({
       accessToken: generateToken(manager),
       refreshToken: generateRefreshToken(manager),
@@ -89,6 +94,8 @@ exports.propertyManagerLogin = async (req, res) => {
         email: manager.email,
         role: manager.role,
         permissions: manager.permissions,
+        propertyId,
+        propertyIds,
       },
     });
   } catch (err) {

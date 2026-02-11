@@ -88,13 +88,14 @@ exports.createEmployee = async (req, res) => {
         : req.userType === "EMPLOYEE"
           ? "Employee"
           : "User";
+    const currentUserId = req.user?._id || req.user?.id;
 
     const employee = new Employee({
       ...data,
       email: data.email.toLowerCase(),
       username: data.username.toLowerCase(),
       passwordHash: password, // hashed via schema middleware
-      createdBy: { id: req.user.id, type: createdByType },
+      createdBy: { id: currentUserId, type: createdByType },
     });
     normalizeEmployeeProperties(employee);
 
@@ -298,6 +299,43 @@ exports.updateEmployee = async (req, res) => {
     ====================== */
     const blockedFields = ["passwordHash", "profileImage"];
     blockedFields.forEach((f) => delete req.body[f]);
+
+    if (req.body.reportingManager) {
+      const type = req.body.reportingManagerType || "Employee";
+      const modelByType = {
+        Employee,
+        PropertyManager: require("../models/propertyManagerModel"),
+        User: require("../models/userModel"),
+      };
+      const ManagerModel = modelByType[type];
+
+      if (!ManagerModel) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid reportingManagerType",
+        });
+      }
+
+      if (!mongoose.Types.ObjectId.isValid(req.body.reportingManager)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid reportingManager",
+        });
+      }
+
+      const managerExists = await ManagerModel.exists({
+        _id: req.body.reportingManager,
+      });
+
+      if (!managerExists) {
+        return res.status(404).json({
+          success: false,
+          message: "Reporting manager not found",
+        });
+      }
+
+      req.body.reportingManagerType = type;
+    }
 
     Object.assign(employee, req.body);
     normalizeEmployeeProperties(employee);

@@ -21,6 +21,16 @@ const buildingSchema = new mongoose.Schema(
       min: 0,
     },
 
+    units: [
+      {
+        unitNumber: {
+          type: String,
+          trim: true,
+          required: true,
+        },
+      },
+    ],
+
     buildingOrder: {
       type: Number,
       default: 0,

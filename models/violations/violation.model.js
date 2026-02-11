@@ -120,6 +120,16 @@ const violationSchema = new mongoose.Schema(
       default: "",
     },
 
+    select: {
+      type: Boolean,
+      default: false,
+    },
+
+    selectAll: {
+      type: Boolean,
+      default: false,
+    },
+
     // Inspector / admin
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

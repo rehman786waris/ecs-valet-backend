@@ -7,9 +7,12 @@ const generateAndUploadQRCode = require("../utils/generateAndUploadQRCode");
 ===================================================== */
 exports.createBinTag = async (req, res) => {
   try {
-    const { property, unitNumber, barcode, type, building } = req.body;
+    const { property, unitNumber, barcode, type, building, units } = req.body;
+    const resolvedUnits = Array.isArray(units) ? units : [];
+    const resolvedUnitNumber =
+      unitNumber || (resolvedUnits[0] && resolvedUnits[0].unitNumber);
 
-    if (!property || !unitNumber || !barcode || !type) {
+    if (!property || !resolvedUnitNumber || !barcode || !type) {
       return res.status(400).json({
         message: "Property, Unit Number, Barcode, and Type are required",
       });
@@ -37,7 +40,11 @@ exports.createBinTag = async (req, res) => {
         address: `${propertyDoc.address.street}, ${propertyDoc.address.city}`,
       },
       building,
-      unitNumber,
+      unitNumber: resolvedUnitNumber,
+      units:
+        resolvedUnits.length > 0
+          ? resolvedUnits
+          : [{ unitNumber: resolvedUnitNumber }],
       barcode,
       qrCodeImage,
       type,
@@ -129,13 +136,20 @@ exports.updateBinTag = async (req, res) => {
       return res.status(404).json({ message: "Bin tag not found" });
     }
 
-    const allowedFields = ["unitNumber", "status", "type", "building"];
+    const allowedFields = ["unitNumber", "units", "status", "type", "building"];
 
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) {
         binTag[field] = req.body[field];
       }
     });
+    if (
+      req.body.units &&
+      Array.isArray(req.body.units) &&
+      req.body.units[0]?.unitNumber
+    ) {
+      binTag.unitNumber = req.body.units[0].unitNumber;
+    }
 
     await binTag.save();
 

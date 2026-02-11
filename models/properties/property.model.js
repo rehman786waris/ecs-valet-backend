@@ -35,6 +35,11 @@ const propertySchema = new mongoose.Schema(
       index: true,
     },
 
+    propertyLogo: {
+      type: String,
+      trim: true,
+    },
+
     propertyType: {
       type: String,
       enum: ["Apartment", "Condo", "Commercial", "Townhouse", "Other"],
@@ -93,6 +98,11 @@ const propertySchema = new mongoose.Schema(
     serviceAlertSMS: {
       propertyCheckin: String,
       propertyCheckout: String,
+    },
+
+    violationReminder: {
+      type: String,
+      default: false,
     },
 
     isActive: {

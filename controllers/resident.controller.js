@@ -1,4 +1,8 @@
 const Resident = require("../models/residents/resident.model");
+const Building = require("../models/buildings.model");
+
+const escapeRegExp = (value) =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const buildPropertyManagerAccessFilter = (req) => {
   const allowedProperties = (req.user?.properties || []).map((id) => String(id));
@@ -18,8 +22,48 @@ const buildPropertyManagerAccessFilter = (req) => {
 ===================================================== */
 exports.createResident = async (req, res) => {
   try {
+    if (req.body?.unit) {
+      const unitValue = String(req.body.unit).trim();
+      if (!unitValue) {
+        return res.status(400).json({ message: "Unit is required" });
+      }
+
+      const building = await Building.findOne({
+        "units.unitNumber": new RegExp(`^${escapeRegExp(unitValue)}$`, "i"),
+      }).select("_id property");
+
+      if (!building) {
+        return res.status(404).json({ message: "Unit not found" });
+      }
+
+      if (
+        req.body.building &&
+        String(req.body.building) !== String(building._id)
+      ) {
+        return res.status(400).json({
+          message: "Building does not match unit",
+        });
+      }
+
+      if (
+        req.body.property &&
+        String(req.body.property) !== String(building.property)
+      ) {
+        return res.status(400).json({
+          message: "Property does not match unit",
+        });
+      }
+
+      req.body.unit = unitValue;
+      req.body.building = building._id;
+      req.body.property = building.property;
+    }
+
     const { allowedProperties } = buildPropertyManagerAccessFilter(req);
-    if (req.body.property && !allowedProperties.includes(String(req.body.property))) {
+    if (
+      req.body.property &&
+      !allowedProperties.includes(String(req.body.property))
+    ) {
       return res.status(403).json({ message: "Access denied" });
     }
 

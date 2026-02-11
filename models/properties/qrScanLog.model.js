@@ -35,6 +35,14 @@ const qrScanLogSchema = new mongoose.Schema(
     snapshot: {
       propertyName: String,
       unitNumber: String,
+      units: [
+        {
+          unitNumber: {
+            type: String,
+            trim: true,
+          },
+        },
+      ],
       barcode: String,
     },
   },

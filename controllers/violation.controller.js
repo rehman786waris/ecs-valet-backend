@@ -11,6 +11,7 @@ const User = require("../models/userModel");
 ===================================================== */
 exports.createViolation = async (req, res) => {
   try {
+    const currentUserId = req.user?._id || req.user?.id;
     const {
       property,
       user,
@@ -20,6 +21,8 @@ exports.createViolation = async (req, res) => {
       building,
       floor,
       notes,
+      select,
+      selectAll,
       source = "Manual",
       binTagId,
     } = req.body;
@@ -52,10 +55,12 @@ exports.createViolation = async (req, res) => {
       building,
       floor,
       notes,
+      select: typeof select === "boolean" ? select : undefined,
+      selectAll: typeof selectAll === "boolean" ? selectAll : undefined,
       source,
       binTagId,
       images,
-      createdBy: req.user._id,
+      createdBy: currentUserId,
       submittedFromMobile: source === "Scan",
     });
 
@@ -241,6 +246,8 @@ exports.updateViolation = async (req, res) => {
       "building",
       "floor",
       "notes",
+      "select",
+      "selectAll",
     ];
 
     allowedFields.forEach((field) => {

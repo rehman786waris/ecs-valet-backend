@@ -11,7 +11,15 @@ const adminManagerEmployeeAuth = require("../middlewares/adminManagerEmployeeAut
 ===================================================== */
 
 // Create property
-router.post("/", adminAuth, uploadPropertyImages.array("images", 10), propertyController.createProperty);
+router.post(
+  "/",
+  adminAuth,
+  uploadPropertyImages.fields([
+    { name: "images", maxCount: 10 },
+    { name: "propertyLogo", maxCount: 1 },
+  ]),
+  propertyController.createProperty
+);
 
 // Get all properties
 router.get("/", adminManagerEmployeeAuth, propertyController.getProperties);
@@ -20,7 +28,15 @@ router.get("/", adminManagerEmployeeAuth, propertyController.getProperties);
 router.get("/:id", adminAuth, propertyController.getPropertyById);
 
 // Update property
-router.put("/:id", adminAuth, uploadPropertyImages.array("images", 10), propertyController.updateProperty);
+router.put(
+  "/:id",
+  adminAuth,
+  uploadPropertyImages.fields([
+    { name: "images", maxCount: 10 },
+    { name: "propertyLogo", maxCount: 1 },
+  ]),
+  propertyController.updateProperty
+);
 
 // Toggle active/inactive
 router.patch("/:id/status", adminAuth, propertyController.togglePropertyStatus);

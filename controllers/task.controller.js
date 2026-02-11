@@ -5,6 +5,7 @@ const Task = require("../models/tasks/task.model");
 ===================================================== */
 exports.createTask = async (req, res) => {
   try {
+    const currentUserId = req.user?._id || req.user?.id;
     const {
       title,
       description,
@@ -27,7 +28,7 @@ exports.createTask = async (req, res) => {
       property,
       photoRequired,
       notifyPropertyManager,
-      createdBy: req.user.id,
+      createdBy: currentUserId,
     });
 
     res.status(201).json({
@@ -203,5 +204,4 @@ exports.deleteTask = async (req, res) => {
     });
   }
 };
-
 
