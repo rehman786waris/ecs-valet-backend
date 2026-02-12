@@ -10,6 +10,43 @@ const generateAndUploadQRCode = require("../utils/generateAndUploadQRCode");
 ===================================================== */
 const parseBoolean = (v) => v === true || v === "true" || v === "on";
 
+const toObjectIds = (ids) =>
+  (ids || [])
+    .map((id) =>
+      mongoose.Types.ObjectId.isValid(id)
+        ? new mongoose.Types.ObjectId(id)
+        : null
+    )
+    .filter(Boolean);
+
+const buildPropertyAccessQuery = async (req) => {
+  const base = { _id: req.params.id, isDeleted: false };
+
+  if (req.userType === "PROPERTY_MANAGER") {
+    const propertyIds = req.user.properties?.length
+      ? req.user.properties
+      : await Property.find({ propertyManager: req.user._id }).distinct("_id");
+    const allowedIds = toObjectIds(propertyIds);
+    return { $and: [base, { _id: { $in: allowedIds } }] };
+  }
+
+  if (req.userType === "EMPLOYEE") {
+    const employeePropertyIds =
+      Array.isArray(req.user.properties) && req.user.properties.length
+        ? req.user.properties
+        : req.user.property
+          ? [req.user.property]
+          : [];
+    return { $and: [base, { _id: { $in: toObjectIds(employeePropertyIds) } }] };
+  }
+
+  if (req.user?.company) {
+    return { ...base, company: req.user.company };
+  }
+
+  return base;
+};
+
 const generateUnitNumber = (bIndex, uIndex) =>
   `B${bIndex + 1}-U${uIndex + 1}`;
 
@@ -145,15 +182,6 @@ exports.getProperties = async (req, res) => {
     const { page = 1, limit = 10, search, isActive, customer, propertyManager } =
       req.query;
 
-    const toObjectIds = (ids) =>
-      (ids || [])
-        .map((id) =>
-          mongoose.Types.ObjectId.isValid(id)
-            ? new mongoose.Types.ObjectId(id)
-            : null
-        )
-        .filter(Boolean);
-
     const query = {
       isDeleted: false,
     };
@@ -217,11 +245,7 @@ exports.getProperties = async (req, res) => {
 ===================================================== */
 exports.getPropertyById = async (req, res) => {
   try {
-    const property = await Property.findOne({
-      _id: req.params.id,
-      company: req.user.company,
-      isDeleted: false,
-    })
+    const property = await Property.findOne(await buildPropertyAccessQuery(req))
       .populate("customer")
       .populate("propertyManager")
       .populate("buildings");
@@ -244,11 +268,7 @@ exports.getPropertyById = async (req, res) => {
 ===================================================== */
 exports.updateProperty = async (req, res) => {
   try {
-    const property = await Property.findOne({
-      _id: req.params.id,
-      company: req.user.company,
-      isDeleted: false,
-    });
+    const property = await Property.findOne(await buildPropertyAccessQuery(req));
 
     if (!property) {
       return res.status(404).json({
@@ -271,7 +291,7 @@ exports.updateProperty = async (req, res) => {
       property.propertyLogo = req.files.propertyLogo[0].location;
     }
 
-    const fields = [
+    let fields = [
       "customer",
       "propertyManager",
       "propertyName",
@@ -285,6 +305,10 @@ exports.updateProperty = async (req, res) => {
       "violationReminder",
       "isActive",
     ];
+
+    if (req.userType === "PROPERTY_MANAGER") {
+      fields = fields.filter((f) => f !== "propertyManager");
+    }
 
     fields.forEach((f) => {
       if (req.body[f] !== undefined) property[f] = req.body[f];
@@ -303,11 +327,7 @@ exports.updateProperty = async (req, res) => {
 ===================================================== */
 exports.togglePropertyStatus = async (req, res) => {
   try {
-    const property = await Property.findOne({
-      _id: req.params.id,
-      company: req.user.company,
-      isDeleted: false,
-    });
+    const property = await Property.findOne(await buildPropertyAccessQuery(req));
 
     if (!property) {
       return res.status(404).json({
@@ -330,11 +350,7 @@ exports.togglePropertyStatus = async (req, res) => {
 ===================================================== */
 exports.deleteProperty = async (req, res) => {
   try {
-    const property = await Property.findOne({
-      _id: req.params.id,
-      company: req.user.company,
-      isDeleted: false,
-    });
+    const property = await Property.findOne(await buildPropertyAccessQuery(req));
 
     if (!property) {
       return res.status(404).json({

@@ -1,11 +1,18 @@
 const Resident = require("../models/residents/resident.model");
 const Building = require("../models/buildings.model");
+const Property = require("../models/properties/property.model");
 
 const escapeRegExp = (value) =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const buildPropertyManagerAccessFilter = (req) => {
-  const allowedProperties = (req.user?.properties || []).map((id) => String(id));
+const buildPropertyManagerAccessFilter = async (req) => {
+  let allowedProperties = (req.user?.properties || []).map((id) => String(id));
+  if (!allowedProperties.length && req.userType === "PROPERTY_MANAGER") {
+    const ids = await Property.find({
+      propertyManager: req.user?._id,
+    }).distinct("_id");
+    allowedProperties = ids.map((id) => String(id));
+  }
   return {
     allowedProperties,
     accessFilter: {
@@ -28,9 +35,25 @@ exports.createResident = async (req, res) => {
         return res.status(400).json({ message: "Unit is required" });
       }
 
-      const building = await Building.findOne({
+      const buildingQuery = {
         "units.unitNumber": new RegExp(`^${escapeRegExp(unitValue)}$`, "i"),
-      }).select("_id property");
+      };
+      if (req.body.property) {
+        buildingQuery.property = req.body.property;
+      }
+      if (req.body.building) {
+        buildingQuery._id = req.body.building;
+      }
+      if (!req.body.property && !req.body.building && req.userType === "PROPERTY_MANAGER") {
+        const { allowedProperties } = await buildPropertyManagerAccessFilter(req);
+        if (allowedProperties.length) {
+          buildingQuery.property = { $in: allowedProperties };
+        }
+      }
+
+      const building = await Building.findOne(buildingQuery).select(
+        "_id property"
+      );
 
       if (!building) {
         return res.status(404).json({ message: "Unit not found" });
@@ -59,12 +82,39 @@ exports.createResident = async (req, res) => {
       req.body.property = building.property;
     }
 
-    const { allowedProperties } = buildPropertyManagerAccessFilter(req);
+    if (req.body.email) {
+      req.body.email = String(req.body.email).trim().toLowerCase();
+    }
+
+    const { allowedProperties } = await buildPropertyManagerAccessFilter(req);
     if (
       req.body.property &&
       !allowedProperties.includes(String(req.body.property))
     ) {
       return res.status(403).json({ message: "Access denied" });
+    }
+
+    if (req.body.property && req.body.unit) {
+      const existingByUnit = await Resident.findOne({
+        property: req.body.property,
+        unit: req.body.unit,
+      }).select("_id");
+      if (existingByUnit) {
+        return res
+          .status(409)
+          .json({ message: "Resident already exists for this unit" });
+      }
+    }
+
+    if (req.body.email) {
+      const existingByEmail = await Resident.findOne({
+        email: req.body.email,
+      }).select("_id");
+      if (existingByEmail) {
+        return res
+          .status(409)
+          .json({ message: "Resident with this email already exists" });
+      }
     }
 
     const resident = await Resident.create({
@@ -88,7 +138,8 @@ exports.getResidents = async (req, res) => {
   try {
     const { property, search, isActive = true } = req.query;
 
-    const { allowedProperties, accessFilter } = buildPropertyManagerAccessFilter(req);
+    const { allowedProperties, accessFilter } =
+      await buildPropertyManagerAccessFilter(req);
     const filter = { isActive };
     const and = [accessFilter];
 
@@ -130,7 +181,7 @@ exports.getResidents = async (req, res) => {
 ===================================================== */
 exports.getResidentById = async (req, res) => {
   try {
-    const { accessFilter } = buildPropertyManagerAccessFilter(req);
+    const { accessFilter } = await buildPropertyManagerAccessFilter(req);
     const resident = await Resident.findOne({ _id: req.params.id, ...accessFilter })
       .populate("property")
       .populate("building");
@@ -149,9 +200,54 @@ exports.getResidentById = async (req, res) => {
 ===================================================== */
 exports.updateResident = async (req, res) => {
   try {
-    const { allowedProperties, accessFilter } = buildPropertyManagerAccessFilter(req);
+    const { allowedProperties, accessFilter } =
+      await buildPropertyManagerAccessFilter(req);
     if (req.body.property && !allowedProperties.includes(String(req.body.property))) {
       return res.status(403).json({ message: "Access denied" });
+    }
+
+    const existing = await Resident.findOne({
+      _id: req.params.id,
+      ...accessFilter,
+    });
+    if (!existing) {
+      return res.status(404).json({ message: "Resident not found" });
+    }
+
+    const nextProperty =
+      req.body.property !== undefined ? req.body.property : existing.property;
+    const nextUnit = req.body.unit !== undefined ? req.body.unit : existing.unit;
+    let nextEmail =
+      req.body.email !== undefined ? req.body.email : existing.email;
+
+    if (nextEmail) {
+      nextEmail = String(nextEmail).trim().toLowerCase();
+      req.body.email = nextEmail;
+    }
+
+    if (nextProperty && nextUnit) {
+      const conflictByUnit = await Resident.findOne({
+        _id: { $ne: req.params.id },
+        property: nextProperty,
+        unit: nextUnit,
+      }).select("_id");
+      if (conflictByUnit) {
+        return res
+          .status(409)
+          .json({ message: "Resident already exists for this unit" });
+      }
+    }
+
+    if (nextEmail) {
+      const conflictByEmail = await Resident.findOne({
+        _id: { $ne: req.params.id },
+        email: nextEmail,
+      }).select("_id");
+      if (conflictByEmail) {
+        return res
+          .status(409)
+          .json({ message: "Resident with this email already exists" });
+      }
     }
 
     const resident = await Resident.findOneAndUpdate(
@@ -177,7 +273,7 @@ exports.updateResident = async (req, res) => {
 ===================================================== */
 exports.deleteResident = async (req, res) => {
   try {
-    const { accessFilter } = buildPropertyManagerAccessFilter(req);
+    const { accessFilter } = await buildPropertyManagerAccessFilter(req);
     const resident = await Resident.findOneAndUpdate(
       { _id: req.params.id, ...accessFilter },
       { isActive: false },

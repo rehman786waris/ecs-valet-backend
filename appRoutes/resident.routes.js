@@ -12,35 +12,35 @@ const roleAuth = require("../middlewares/roleAuth");
 router.post(
   "/",
   adminManagerEmployeeAuth,
-  roleAuth("PROPERTY_MANAGER"),
+  roleAuth("PROPERTY_MANAGER", "admin", "super-admin"),
   residentController.createResident
 );
 
 router.get(
   "/",
   adminManagerEmployeeAuth,
-  roleAuth("PROPERTY_MANAGER"),
+  roleAuth("PROPERTY_MANAGER", "admin", "super-admin"),
   residentController.getResidents
 );
 
 router.get(
   "/:id",
   adminManagerEmployeeAuth,
-  roleAuth("PROPERTY_MANAGER"),
+  roleAuth("PROPERTY_MANAGER", "admin", "super-admin"),
   residentController.getResidentById
 );
 
 router.put(
   "/:id",
   adminManagerEmployeeAuth,
-  roleAuth("PROPERTY_MANAGER"),
+  roleAuth("PROPERTY_MANAGER", "admin", "super-admin"),
   residentController.updateResident
 );
 
 router.delete(
   "/:id",
   adminManagerEmployeeAuth,
-  roleAuth("PROPERTY_MANAGER"),
+  roleAuth("PROPERTY_MANAGER", "admin", "super-admin"),
   residentController.deleteResident
 );
 

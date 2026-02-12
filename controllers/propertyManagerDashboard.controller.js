@@ -32,20 +32,29 @@ const getPropertyIdsForManager = async (manager) => {
 
 const resolveDashboardParams = (req) => {
   const source = req.method === "POST" ? req.body || {} : req.query || {};
+  const clean = (value) =>
+    typeof value === "string" ? value.trim() : value;
   return {
-    date: source.date,
-    propertyId: source.propertyId,
-    propertyManagerId: source.propertyManagerId,
-    search: source.search,
+    date: clean(source.date),
+    propertyId: clean(source.propertyId),
+    propertyManagerId: clean(source.propertyManagerId),
+    search: clean(source.search),
     page: source.page,
     limit: source.limit,
   };
 };
 
+const sanitizeId = (value) => {
+  if (value === null || value === undefined) return value;
+  return typeof value === "string" ? value.trim() : value;
+};
+
 exports.getDashboard = async (req, res) => {
   try {
-    const { date, propertyId, propertyManagerId, search, page, limit } =
+    let { date, propertyId, propertyManagerId, search, page, limit } =
       resolveDashboardParams(req);
+    propertyId = sanitizeId(propertyId);
+    propertyManagerId = sanitizeId(propertyManagerId);
     const safePage = Math.max(parseInt(page) || 1, 1);
     const safeLimit = Math.max(parseInt(limit) || 5, 1);
     const skip = (safePage - 1) * safeLimit;
@@ -61,6 +70,9 @@ exports.getDashboard = async (req, res) => {
       propertyIds = await getPropertyIdsForManager(req.user);
     } else {
       if (propertyManagerId) {
+        if (!mongoose.Types.ObjectId.isValid(propertyManagerId)) {
+          return res.status(400).json({ message: "Invalid propertyManagerId" });
+        }
         const pm = await PropertyManager.findById(propertyManagerId);
         if (!pm) {
           return res.status(404).json({ message: "Property Manager not found" });
@@ -95,13 +107,13 @@ exports.getDashboard = async (req, res) => {
           routeCheckpoints: 0,
           todaysTaskCompleted: 0,
         },
-      activityLogs: {
-        page: safePage,
-        limit: safeLimit,
-        totalRecords: 0,
-        totalPages: 0,
-        data: [],
-      },
+        activityLogs: {
+          page: safePage,
+          limit: safeLimit,
+          totalRecords: 0,
+          totalPages: 0,
+          data: [],
+        },
       });
     }
 
@@ -193,8 +205,27 @@ exports.getDashboard = async (req, res) => {
         {
           $lookup: {
             from: "employees",
-            localField: "scannedBy",
-            foreignField: "_id",
+            let: { scannedById: "$scannedBy" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $eq: [
+                      { $toString: "$_id" },
+                      { $toString: "$$scannedById" },
+                    ],
+                  },
+                },
+              },
+              {
+                $project: {
+                  firstName: 1,
+                  lastName: 1,
+                  email: 1,
+                  username: 1,
+                },
+              },
+            ],
             as: "employee",
           },
         },
@@ -279,8 +310,27 @@ exports.getDashboard = async (req, res) => {
         {
           $lookup: {
             from: "employees",
-            localField: "scannedBy",
-            foreignField: "_id",
+            let: { scannedById: "$scannedBy" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $eq: [
+                      { $toString: "$_id" },
+                      { $toString: "$$scannedById" },
+                    ],
+                  },
+                },
+              },
+              {
+                $project: {
+                  firstName: 1,
+                  lastName: 1,
+                  email: 1,
+                  username: 1,
+                },
+              },
+            ],
             as: "employee",
           },
         },

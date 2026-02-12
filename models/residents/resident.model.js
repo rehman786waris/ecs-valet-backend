@@ -88,8 +88,24 @@ const residentSchema = new mongoose.Schema(
  * Prevent duplicate residents in same property + unit
  */
 residentSchema.index(
-  { property: 1, unit: 1, email: 1 },
-  { unique: false }
+  { property: 1, unit: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      property: { $type: "objectId" },
+      unit: { $type: "string" },
+    },
+  }
+);
+
+residentSchema.index(
+  { email: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      email: { $type: "string" },
+    },
+  }
 );
 
 module.exports = mongoose.model("Resident", residentSchema);
