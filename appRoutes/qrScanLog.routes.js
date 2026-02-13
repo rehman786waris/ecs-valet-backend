@@ -12,9 +12,9 @@ const adminManagerEmployeeAuth = require("../middlewares/adminManagerEmployeeAut
 // Mobile scan
 router.post("/scan", adminManagerEmployeeAuth, controller.createScanLog);
 
-// Admin dashboard
-router.get("/", adminAuth, controller.getScanLogs);
-router.get("/:id", adminAuth, controller.getScanLogById);
+// Admin/Manager/Employee dashboard
+router.get("/", adminManagerEmployeeAuth, controller.getScanLogs);
+router.get("/:id", adminManagerEmployeeAuth, controller.getScanLogById);
 router.delete("/:id", adminAuth, controller.deleteScanLog);
 
 module.exports = router;

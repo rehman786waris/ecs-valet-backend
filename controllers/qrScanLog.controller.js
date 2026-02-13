@@ -3,6 +3,36 @@ const BinTag = require("../models/properties/binTag.model");
 const RecycleReport = require("../models/reports/recycleReport.model");
 const Property = require("../models/properties/property.model");
 
+const getEmployeeCompanyId = async (req) => {
+  let companyId = req.user.company;
+  if (companyId || req.userType !== "EMPLOYEE") return companyId;
+
+  const employeeProperties =
+    Array.isArray(req.user.properties) && req.user.properties.length
+      ? req.user.properties
+      : req.user.property
+        ? [req.user.property]
+        : [];
+  if (!employeeProperties.length) return null;
+  const property = await Property.findById(employeeProperties[0]).select(
+    "company"
+  );
+  return property?.company || null;
+};
+
+const getPropertyIdsForManager = async (manager) => {
+  const properties = await Property.find({
+    propertyManager: manager._id,
+    isDeleted: false,
+  }).select("_id");
+
+  let ids = properties.map((p) => p._id);
+  if (!ids.length && Array.isArray(manager.properties) && manager.properties.length) {
+    ids = manager.properties;
+  }
+  return ids;
+};
+
 /* =====================================================
    CREATE SCAN LOG (AUTO – MOBILE SCAN)
 ===================================================== */
@@ -14,27 +44,11 @@ exports.createScanLog = async (req, res) => {
       return res.status(400).json({ message: "Barcode is required" });
     }
 
-    let companyId = req.user.company;
+    let companyId = await getEmployeeCompanyId(req);
     if (!companyId && req.userType === "EMPLOYEE") {
-      // Employee doesn't store company directly; infer via property
-      const employeeProperties =
-        Array.isArray(req.user.properties) && req.user.properties.length
-          ? req.user.properties
-          : req.user.property
-            ? [req.user.property]
-            : [];
-      if (!employeeProperties.length) {
-        return res
-          .status(400)
-          .json({ message: "Employee property is not assigned" });
-      }
-      const property = await Property.findById(employeeProperties[0]).select(
-        "company"
-      );
-      if (!property) {
-        return res.status(404).json({ message: "Property not found" });
-      }
-      companyId = property.company;
+      return res
+        .status(400)
+        .json({ message: "Employee property is not assigned" });
     }
 
     const binTag = await BinTag.findOne({
@@ -93,9 +107,13 @@ exports.createScanLog = async (req, res) => {
       scannedBy: req.user._id,
     });
 
+    const populatedScanLog = await QrScanLog.findById(scanLog._id)
+      .populate("binTag", "unitNumber barcode type")
+      .populate("scannedBy", "firstName lastName email username");
+
     res.status(201).json({
       message: "QR scan logged successfully",
-      data: scanLog,
+      data: populatedScanLog || scanLog,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -116,11 +134,50 @@ exports.getScanLogs = async (req, res) => {
       search,
     } = req.query;
 
-    const query = {
-      company: req.user.company,
-    };
+    const query = {};
 
-    if (binTag) query.binTag = binTag;
+    if (req.userType === "EMPLOYEE") {
+      const companyId = await getEmployeeCompanyId(req);
+      if (!companyId) {
+        return res
+          .status(400)
+          .json({ message: "Employee property is not assigned" });
+      }
+      query.company = companyId;
+      query.scannedBy = req.user._id;
+    } else if (req.userType === "PROPERTY_MANAGER") {
+      const propertyIds = await getPropertyIdsForManager(req.user);
+      if (!propertyIds.length) {
+        return res.json({
+          data: [],
+          pagination: {
+            total: 0,
+            page: Number(page),
+            limit: Number(limit),
+          },
+        });
+      }
+      const binTagIds = await BinTag.find({
+        property: { $in: propertyIds },
+        isDeleted: false,
+      }).select("_id");
+      const allowedBinTagIds = binTagIds.map((b) => b._id);
+      if (binTag && !allowedBinTagIds.some((id) => id.toString() === binTag)) {
+        return res.json({
+          data: [],
+          pagination: {
+            total: 0,
+            page: Number(page),
+            limit: Number(limit),
+          },
+        });
+      }
+      query.binTag = binTag ? binTag : { $in: allowedBinTagIds };
+    } else {
+      query.company = req.user.company;
+    }
+
+    if (binTag && req.userType !== "PROPERTY_MANAGER") query.binTag = binTag;
 
     if (fromDate || toDate) {
       query.scannedAt = {};
@@ -138,7 +195,7 @@ exports.getScanLogs = async (req, res) => {
 
     const logs = await QrScanLog.find(query)
       .populate("binTag", "unitNumber barcode type")
-      .populate("scannedBy", "firstName lastName")
+      .populate("scannedBy", "firstName lastName email username")
       .sort({ scannedAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit));
@@ -163,12 +220,38 @@ exports.getScanLogs = async (req, res) => {
 ===================================================== */
 exports.getScanLogById = async (req, res) => {
   try {
-    const log = await QrScanLog.findOne({
-      _id: req.params.id,
-      company: req.user.company,
-    })
-      .populate("binTag")
-      .populate("scannedBy", "firstName lastName");
+    let log;
+    if (req.userType === "EMPLOYEE") {
+      log = await QrScanLog.findOne({
+        _id: req.params.id,
+        scannedBy: req.user._id,
+      })
+        .populate("binTag")
+        .populate("scannedBy", "firstName lastName email username");
+    } else if (req.userType === "PROPERTY_MANAGER") {
+      const propertyIds = await getPropertyIdsForManager(req.user);
+      if (!propertyIds.length) {
+        return res.status(404).json({ message: "Scan log not found" });
+      }
+      log = await QrScanLog.findById(req.params.id)
+        .populate("binTag")
+        .populate("scannedBy", "firstName lastName email username");
+      if (
+        log?.binTag?.property &&
+        !propertyIds.some(
+          (id) => id.toString() === log.binTag.property.toString()
+        )
+      ) {
+        log = null;
+      }
+    } else {
+      log = await QrScanLog.findOne({
+        _id: req.params.id,
+        company: req.user.company,
+      })
+        .populate("binTag")
+        .populate("scannedBy", "firstName lastName email username");
+    }
 
     if (!log) {
       return res.status(404).json({ message: "Scan log not found" });

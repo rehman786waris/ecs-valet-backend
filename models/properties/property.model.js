@@ -24,8 +24,9 @@ const propertySchema = new mongoose.Schema(
     },
 
     redundantRouteService: {
-      type: Boolean,
-      default: false,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      default: null,
     },
 
     propertyName: {
@@ -40,6 +41,16 @@ const propertySchema = new mongoose.Schema(
       trim: true,
     },
 
+    propertyBarcode: {
+      type: String,
+      trim: true,
+      index: true,
+    },
+
+    propertyQrCodeImage: {
+      type: String,
+      trim: true,
+    },
     propertyType: {
       type: String,
       enum: ["Apartment", "Condo", "Commercial", "Townhouse", "Other"],
@@ -98,6 +109,15 @@ const propertySchema = new mongoose.Schema(
     serviceAlertSMS: {
       propertyCheckin: String,
       propertyCheckout: String,
+      propertyCheckInAt: {
+        type: Date,
+        default: null,
+      },
+  
+      propertyCheckOutAt: {
+        type: Date,
+        default: null,
+      },
     },
 
     violationReminder: {

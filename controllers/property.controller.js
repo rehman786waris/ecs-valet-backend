@@ -8,8 +8,6 @@ const generateAndUploadQRCode = require("../utils/generateAndUploadQRCode");
 /* =====================================================
    HELPERS
 ===================================================== */
-const parseBoolean = (v) => v === true || v === "true" || v === "on";
-
 const toObjectIds = (ids) =>
   (ids || [])
     .map((id) =>
@@ -53,6 +51,88 @@ const generateUnitNumber = (bIndex, uIndex) =>
 const generateBarcode = (propertyId, bIndex, uIndex) =>
   `BIN-${propertyId.toString().slice(-4)}-${bIndex + 1}-${uIndex + 1}`;
 
+const generatePropertyBarcode = (propertyId) =>
+  `PROP-${propertyId.toString().slice(-6)}`;
+
+const parseBoolean = (v) => v === true || v === "true" || v === "on";
+const parseNumber = (v) => {
+  if (v === "" || v === null || v === undefined) return undefined;
+  const n = Number(v);
+  return Number.isNaN(n) ? undefined : n;
+};
+
+const buildServiceAgreementFromBody = (body) => {
+  const ag = {};
+  if (body["serviceAgreement.pickupStartDate"] !== undefined) {
+    ag.pickupStartDate = new Date(body["serviceAgreement.pickupStartDate"]);
+  }
+  if (body["serviceAgreement.pickupType"] !== undefined) {
+    ag.pickupType = body["serviceAgreement.pickupType"];
+  }
+  if (body["serviceAgreement.binSizeWaste"] !== undefined) {
+    ag.binSizeWaste = parseNumber(body["serviceAgreement.binSizeWaste"]);
+  }
+  if (body["serviceAgreement.binSizeRecycle"] !== undefined) {
+    ag.binSizeRecycle = parseNumber(body["serviceAgreement.binSizeRecycle"]);
+  }
+  if (body["serviceAgreement.wasteReductionTarget"] !== undefined) {
+    ag.wasteReductionTarget = parseNumber(
+      body["serviceAgreement.wasteReductionTarget"]
+    );
+  }
+
+  const days = [
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+  ];
+  const freq = {};
+  days.forEach((d) => {
+    const key = `serviceAgreement.pickupFrequency.${d}`;
+    if (body[key] !== undefined) freq[d] = parseBoolean(body[key]);
+  });
+  if (Object.keys(freq).length) ag.pickupFrequency = freq;
+
+  return Object.keys(ag).length ? ag : null;
+};
+
+const buildServiceAlertSMSFromBody = (body) => {
+  const alert = {};
+  if (body["serviceAlertSMS.propertyCheckin"] !== undefined) {
+    alert.propertyCheckin = body["serviceAlertSMS.propertyCheckin"];
+  }
+  if (body["serviceAlertSMS.propertyCheckout"] !== undefined) {
+    alert.propertyCheckout = body["serviceAlertSMS.propertyCheckout"];
+  }
+  if (body["serviceAlertSMS.propertyCheckInAt"] !== undefined) {
+    alert.propertyCheckInAt = new Date(body["serviceAlertSMS.propertyCheckInAt"]);
+  }
+  if (body["serviceAlertSMS.propertyCheckOutAt"] !== undefined) {
+    alert.propertyCheckOutAt = new Date(body["serviceAlertSMS.propertyCheckOutAt"]);
+  }
+  return Object.keys(alert).length ? alert : null;
+};
+
+const resolveEmployeeCompanyId = async (req) => {
+  if (req.userType !== "EMPLOYEE") return req.user.company;
+  if (req.user.company) return req.user.company;
+  const employeePropertyIds =
+    Array.isArray(req.user.properties) && req.user.properties.length
+      ? req.user.properties
+      : req.user.property
+        ? [req.user.property]
+        : [];
+  if (!employeePropertyIds.length) return null;
+  const property = await Property.findById(employeePropertyIds[0]).select(
+    "company"
+  );
+  return property?.company || null;
+};
+
 /* =====================================================
    CREATE PROPERTY (BUILDINGS + BINTAGS + QR)
 ===================================================== */
@@ -61,8 +141,34 @@ exports.createProperty = async (req, res) => {
     const currentUserId = req.user?._id || req.user?.id;
     const data = req.body;
 
+    const companyId = await resolveEmployeeCompanyId(req);
+    if (!companyId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Employee company is not assigned" });
+    }
+
     if (data.redundantRouteService !== undefined) {
-      data.redundantRouteService = parseBoolean(data.redundantRouteService);
+      data.redundantRouteService =
+        req.userType === "EMPLOYEE"
+          ? req.user._id
+          : data.redundantRouteService;
+    }
+
+    const serviceAgreement = buildServiceAgreementFromBody(req.body);
+    if (serviceAgreement) {
+      data.serviceAgreement = {
+        ...(data.serviceAgreement || {}),
+        ...serviceAgreement,
+      };
+    }
+
+    const serviceAlertSMS = buildServiceAlertSMSFromBody(req.body);
+    if (serviceAlertSMS) {
+      data.serviceAlertSMS = {
+        ...(data.serviceAlertSMS || {}),
+        ...serviceAlertSMS,
+      };
     }
 
     const buildingsPayload = data.buildings
@@ -73,11 +179,19 @@ exports.createProperty = async (req, res) => {
     // 1️⃣ Property
     const property = await Property.create({
       ...data,
-      company: req.user.company,
+      company: companyId,
       propertyLogo: propertyLogoFile?.location || data.propertyLogo,
       createdBy: currentUserId,
       buildings: [],
     });
+
+    if (!property.propertyBarcode) {
+      const propertyBarcode = generatePropertyBarcode(property._id);
+      const propertyQrCodeImage = await generateAndUploadQRCode(propertyBarcode);
+      property.propertyBarcode = propertyBarcode;
+      property.propertyQrCodeImage = propertyQrCodeImage;
+      await property.save();
+    }
 
     const files = Array.isArray(req.files)
       ? req.files
@@ -131,7 +245,7 @@ exports.createProperty = async (req, res) => {
         const qrCodeImage = await generateAndUploadQRCode(barcode);
 
         binTags.push({
-          company: req.user.company,
+          company: companyId,
           property: property._id,
           propertySnapshot: {
             propertyName: property.propertyName,
@@ -223,6 +337,7 @@ exports.getProperties = async (req, res) => {
     const data = await Property.find(query)
       .populate("customer", "name")
       .populate("propertyManager", "firstName lastName")
+      .populate("redundantRouteService", "firstName lastName email username")
       .populate("buildings")
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
@@ -248,6 +363,7 @@ exports.getPropertyById = async (req, res) => {
     const property = await Property.findOne(await buildPropertyAccessQuery(req))
       .populate("customer")
       .populate("propertyManager")
+      .populate("redundantRouteService", "firstName lastName email username")
       .populate("buildings");
 
     if (!property) {
@@ -278,9 +394,30 @@ exports.updateProperty = async (req, res) => {
     }
 
     if (req.body.redundantRouteService !== undefined) {
-      property.redundantRouteService = parseBoolean(
-        req.body.redundantRouteService
-      );
+      property.redundantRouteService =
+        req.userType === "EMPLOYEE"
+          ? req.user._id
+          : req.body.redundantRouteService;
+    }
+
+    const serviceAgreement = buildServiceAgreementFromBody(req.body);
+    if (serviceAgreement) {
+      property.serviceAgreement = {
+        ...(property.serviceAgreement?.toObject
+          ? property.serviceAgreement.toObject()
+          : property.serviceAgreement || {}),
+        ...serviceAgreement,
+      };
+    }
+
+    const serviceAlertSMS = buildServiceAlertSMSFromBody(req.body);
+    if (serviceAlertSMS) {
+      property.serviceAlertSMS = {
+        ...(property.serviceAlertSMS?.toObject
+          ? property.serviceAlertSMS.toObject()
+          : property.serviceAlertSMS || {}),
+        ...serviceAlertSMS,
+      };
     }
 
     if (req.body.violationReminder !== undefined) {
@@ -302,6 +439,10 @@ exports.updateProperty = async (req, res) => {
       "serviceAgreement",
       "serviceAlertSMS",
       "propertyLogo",
+      "propertyCheckIn",
+      "propertyCheckOut",
+      "propertyCheckInAt",
+      "propertyCheckOutAt",
       "violationReminder",
       "isActive",
     ];
