@@ -2,6 +2,45 @@ const Alert = require("../models/alerts/alert.model");
 const AlertReason = require("../models/alerts/alertReason.model");
 const Property = require("../models/properties/property.model");
 
+const ALERT_POPULATE = [
+  { path: "reason", select: "name" },
+  { path: "properties", select: "propertyName" },
+  { path: "createdBy", select: "name" },
+];
+
+const formatAlert = (alertDoc) => {
+  if (!alertDoc) return null;
+
+  const alert = alertDoc.toObject
+    ? alertDoc.toObject({ virtuals: true })
+    : { ...alertDoc };
+
+  alert.id = alert.id || alert._id?.toString?.();
+
+  if (Array.isArray(alert.properties)) {
+    alert.properties = alert.properties
+      .map((property) => {
+        if (!property) return null;
+
+        if (typeof property === "string") {
+          return { id: property, propertyName: null };
+        }
+
+        if (property.toString && !property._id && !property.id) {
+          return { id: property.toString(), propertyName: null };
+        }
+
+        return {
+          id: property.id || property._id?.toString?.() || null,
+          propertyName: property.propertyName ?? property.name ?? null,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  return alert;
+};
+
 /* =====================================================
    CREATE ALERT
 ===================================================== */
@@ -54,10 +93,12 @@ exports.createAlert = async (req, res) => {
     alert.sendStatus = "Sent";
     alert.sentAt = new Date();
     await alert.save();
+    const populatedAlert = await Alert.findById(alert._id)
+      .populate(ALERT_POPULATE);
 
     return res.status(201).json({
       message: "Alert created and sent successfully",
-      data: alert,
+      data: formatAlert(populatedAlert || alert),
     });
   } catch (error) {
     return res.status(500).json({
@@ -72,25 +113,63 @@ exports.createAlert = async (req, res) => {
 ===================================================== */
 exports.getAlerts = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = "", reason, status } = req.query;
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      reason,
+      status,
+      deleted,
+      active,
+    } = req.query;
 
-    const baseQuery = { isActive: true };
+    const baseQuery = { isDeleted: false };
+
+    if (deleted === "true") baseQuery.isDeleted = true;
+    if (deleted === "false") baseQuery.isDeleted = false;
+    if (active === "true") baseQuery.isActive = true;
+    if (active === "false") baseQuery.isActive = false;
 
     if (reason) baseQuery.reason = reason;
 
     if (search) {
-      baseQuery.$or = [{ title: { $regex: search, $options: "i" } }];
+      const searchRegex = new RegExp(search, "i");
+      const [reasonMatches, propertyMatches] = await Promise.all([
+        AlertReason.find({ name: { $regex: searchRegex }, isActive: true }).select("_id"),
+        Property.find({
+          propertyName: { $regex: searchRegex },
+          isDeleted: false,
+        }).select("_id"),
+      ]);
+
+      const reasonIds = reasonMatches.map((r) => r._id);
+      const propertyIds = propertyMatches.map((p) => p._id);
+
+      baseQuery.$or = [
+        { title: { $regex: searchRegex } },
+        ...(reasonIds.length ? [{ reason: { $in: reasonIds } }] : []),
+        ...(propertyIds.length ? [{ properties: { $in: propertyIds } }] : []),
+      ];
     }
 
     const query = { ...baseQuery };
     if (status) query.sendStatus = status;
 
-    const [alerts, total, totalSent, totalPending, totalFailed] =
+    const countersBaseQuery = { ...baseQuery };
+    delete countersBaseQuery.isActive;
+
+    const [
+      alerts,
+      total,
+      totalSent,
+      totalPending,
+      totalFailed,
+      totalActive,
+      totalInactive,
+    ] =
       await Promise.all([
         Alert.find(query)
-          .populate("reason", "name")
-          .populate("properties", "name")
-          .populate("createdBy", "name")
+          .populate(ALERT_POPULATE)
           .sort({ createdAt: -1 })
           .skip((page - 1) * limit)
           .limit(Number(limit)),
@@ -98,6 +177,8 @@ exports.getAlerts = async (req, res) => {
         Alert.countDocuments({ ...baseQuery, sendStatus: "Sent" }),
         Alert.countDocuments({ ...baseQuery, sendStatus: "Pending" }),
         Alert.countDocuments({ ...baseQuery, sendStatus: "Failed" }),
+        Alert.countDocuments({ ...countersBaseQuery, isActive: true }),
+        Alert.countDocuments({ ...countersBaseQuery, isActive: false }),
       ]);
 
     const totalAll = totalSent + totalPending + totalFailed;
@@ -111,8 +192,10 @@ exports.getAlerts = async (req, res) => {
         sent: totalSent,
         pending: totalPending,
         failed: totalFailed,
+        active: totalActive,
+        inactive: totalInactive,
       },
-      data: alerts,
+      data: alerts.map(formatAlert),
     });
   } catch (error) {
     return res.status(500).json({
@@ -128,15 +211,13 @@ exports.getAlerts = async (req, res) => {
 exports.getAlertById = async (req, res) => {
   try {
     const alert = await Alert.findById(req.params.id)
-      .populate("reason", "name")
-      .populate("properties", "name")
-      .populate("createdBy", "name");
+      .populate(ALERT_POPULATE);
 
     if (!alert) {
       return res.status(404).json({ message: "Alert not found" });
     }
 
-    return res.status(200).json(alert);
+    return res.status(200).json(formatAlert(alert));
   } catch (error) {
     return res.status(500).json({
       message: "Failed to fetch alert",
@@ -154,7 +235,7 @@ exports.updateAlert = async (req, res) => {
       req.params.id,
       req.body,
       { new: true }
-    );
+    ).populate(ALERT_POPULATE);
 
     if (!alert) {
       return res.status(404).json({ message: "Alert not found" });
@@ -162,7 +243,7 @@ exports.updateAlert = async (req, res) => {
 
     return res.status(200).json({
       message: "Alert updated successfully",
-      data: alert,
+      data: formatAlert(alert),
     });
   } catch (error) {
     return res.status(500).json({
@@ -177,7 +258,7 @@ exports.updateAlert = async (req, res) => {
 ===================================================== */
 exports.toggleAlertStatus = async (req, res) => {
   try {
-    const alert = await Alert.findById(req.params.id);
+    const alert = await Alert.findById(req.params.id).populate(ALERT_POPULATE);
 
     if (!alert) {
       return res.status(404).json({ message: "Alert not found" });
@@ -188,7 +269,7 @@ exports.toggleAlertStatus = async (req, res) => {
 
     return res.status(200).json({
       message: `Alert ${alert.isActive ? "enabled" : "disabled"} successfully`,
-      data: alert,
+      data: formatAlert(alert),
     });
   } catch (error) {
     return res.status(500).json({
@@ -205,7 +286,7 @@ exports.deleteAlert = async (req, res) => {
   try {
     const alert = await Alert.findByIdAndUpdate(
       req.params.id,
-      { isActive: false },
+      { isActive: false, isDeleted: true },
       { new: true }
     );
 

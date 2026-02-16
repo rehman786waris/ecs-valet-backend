@@ -69,7 +69,7 @@ const binTagSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ["Route Checkpoint", "Bin"],
+      enum: ["Route Checkpoint", "unit"],
       required: true,
       index: true,
     },
@@ -82,6 +82,16 @@ const binTagSchema = new mongoose.Schema(
       enum: ["Active", "Inactive"],
       default: "Active",
       index: true,
+    },
+
+    select: {
+      type: Boolean,
+      default: false,
+    },
+
+    selectAll: {
+      type: Boolean,
+      default: false,
     },
 
     scanCount: {

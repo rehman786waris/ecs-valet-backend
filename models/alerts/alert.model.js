@@ -48,6 +48,12 @@ const alertSchema = new mongoose.Schema(
       index: true,
     },
 
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User", // more flexible than Employee
@@ -55,7 +61,11 @@ const alertSchema = new mongoose.Schema(
       index: true,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  }
 );
 
 module.exports = mongoose.model("Alert", alertSchema);

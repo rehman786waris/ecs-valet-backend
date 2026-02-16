@@ -260,7 +260,7 @@ exports.createProperty = async (req, res) => {
           units: [{ unitNumber: generateUnitNumber(i, u) }],
           barcode,
           qrCodeImage,
-          type: "Bin",
+          type: "unit",
           createdBy: currentUserId,
         });
       }
