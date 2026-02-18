@@ -12,6 +12,8 @@ const TaskLog = require("../models/reports/taskLog.model");
 const Task = require("../models/tasks/task.model");
 const EmployeeClockLog = require("../models/reports/employeeClockLog.model");
 const Property = require("../models/properties/property.model");
+const PropertyCheckLog = require("../models/reports/propertyCheckLog.model");
+const QrScanLog = require("../models/properties/qrScanLog.model");
 
 const resolvePropertyIdsForReport = async (req) => {
   if (req.userType === "EMPLOYEE") {
@@ -159,23 +161,68 @@ exports.missedRouteCheckpoints = async (req, res) => {
 /* ===============================
    CHECK IN / OUT REPORT
 ================================ */
-exports.checkInOutReport = async (req, res) => {
+exports.checkInOutHistoricalReport = async (req, res) => {
   try {
-    const { startDate, endDate, propertyId, employeeId } = req.query;
+    const {
+      startDate,
+      endDate,
+      date,
+      propertyId,
+      property,
+      employeeId,
+      user,
+      activity,
+      search,
+      scanBy,
+    } = req.query;
 
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.max(parseInt(req.query.limit) || 10, 1);
     const skip = (page - 1) * limit;
 
-    const match = {
-      scannedAt: {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      },
-    };
+    const match = {};
+    const normalizedUser = typeof user === "string" ? user.trim() : "";
+    const normalizedProperty = typeof property === "string" ? property.trim() : "";
+    const effectiveEmployeeId =
+      employeeId ||
+      (normalizedUser && mongoose.Types.ObjectId.isValid(normalizedUser)
+        ? normalizedUser
+        : null);
+    const effectivePropertyId =
+      propertyId ||
+      (normalizedProperty && mongoose.Types.ObjectId.isValid(normalizedProperty)
+        ? normalizedProperty
+        : null);
 
-    if (propertyId) match.property = propertyId;
-    if (employeeId) match.employee = employeeId;
+    if (date) {
+      match.scannedAt = {
+        $gte: new Date(`${date}T00:00:00`),
+        $lte: new Date(`${date}T23:59:59`),
+      };
+    } else if (startDate || endDate) {
+      const startHasTime = typeof startDate === "string" && startDate.includes("T");
+      const endHasTime = typeof endDate === "string" && endDate.includes("T");
+      const from = startDate
+        ? new Date(startHasTime ? startDate : `${startDate}T00:00:00.000Z`)
+        : new Date(`${endDate}T00:00:00.000Z`);
+      const to = endDate
+        ? new Date(endHasTime ? endDate : `${endDate}T23:59:59.999Z`)
+        : new Date(from);
+      if (!endDate && startDate) {
+        to.setHours(23, 59, 59, 999);
+      }
+      match.scannedAt = { $gte: from, $lte: to };
+    }
+
+    if (effectivePropertyId && mongoose.Types.ObjectId.isValid(effectivePropertyId)) {
+      match.property = new mongoose.Types.ObjectId(effectivePropertyId);
+    }
+    if (effectiveEmployeeId && mongoose.Types.ObjectId.isValid(effectiveEmployeeId)) {
+      match.employee = new mongoose.Types.ObjectId(effectiveEmployeeId);
+    }
+    if (activity) {
+      match.activityType = activity;
+    }
 
     const pipeline = [
       { $match: match },
@@ -190,23 +237,23 @@ exports.checkInOutReport = async (req, res) => {
           },
           firstScan: { $min: "$scannedAt" },
           lastScan: { $max: "$scannedAt" },
+          activity: { $first: "$activityType" },
+          scanCount: { $sum: 1 },
+          createdAt: { $min: "$createdAt" },
+          updatedAt: { $max: "$updatedAt" },
         },
       },
-    ];
-
-    const totalRecords = (
-      await ScanEvent.aggregate([...pipeline, { $count: "count" }])
-    )[0]?.count || 0;
-
-    const report = await ScanEvent.aggregate([
-      ...pipeline,
-      { $sort: { firstScan: -1 } },
-      { $skip: skip },
-      { $limit: limit },
       {
         $addFields: {
+          checkOutResolved: {
+            $cond: [{ $gt: ["$scanCount", 1] }, "$lastScan", null],
+          },
           serviceDurationSeconds: {
-            $divide: [{ $subtract: ["$lastScan", "$firstScan"] }, 1000],
+            $cond: [
+              { $gt: ["$scanCount", 1] },
+              { $divide: [{ $subtract: ["$lastScan", "$firstScan"] }, 1000] },
+              null,
+            ],
           },
         },
       },
@@ -229,13 +276,505 @@ exports.checkInOutReport = async (req, res) => {
       { $unwind: "$employee" },
       { $unwind: "$checkpoint" },
       {
+        $lookup: {
+          from: "properties",
+          localField: "checkpoint.property",
+          foreignField: "_id",
+          as: "property",
+        },
+      },
+      {
+        $lookup: {
+          from: "buildings",
+          localField: "checkpoint.building",
+          foreignField: "_id",
+          as: "building",
+        },
+      },
+      { $unwind: { path: "$property", preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: "$building", preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          employeeName: {
+            $let: {
+              vars: {
+                fullName: {
+                  $trim: {
+                    input: {
+                      $concat: [
+                        { $ifNull: ["$employee.firstName", ""] },
+                        " ",
+                        { $ifNull: ["$employee.lastName", ""] },
+                      ],
+                    },
+                  },
+                },
+              },
+              in: {
+                $ifNull: [
+                  {
+                    $cond: [
+                      { $ne: ["$$fullName", ""] },
+                      "$$fullName",
+                      { $ifNull: ["$employee.username", "$employee.email"] },
+                    ],
+                  },
+                  "",
+                ],
+              },
+            },
+          },
+          employeeNameResolved: {
+            $cond: [
+              { $ne: [{ $ifNull: ["$employeeName", ""] }, ""] },
+              "$employeeName",
+              "Unknown Employee",
+            ],
+          },
+        },
+      },
+    ];
+
+    if (scanBy) {
+      const scanByRegex = new RegExp(scanBy, "i");
+      const scanByMatch = {
+        $or: [
+          { "employee.firstName": scanByRegex },
+          { "employee.lastName": scanByRegex },
+          { "employee.username": scanByRegex },
+          { "employee.email": scanByRegex },
+          { employeeName: scanByRegex },
+        ],
+      };
+      if (mongoose.Types.ObjectId.isValid(scanBy)) {
+        scanByMatch.$or.push({
+          "employee._id": new mongoose.Types.ObjectId(scanBy),
+        });
+      }
+      pipeline.push({ $match: scanByMatch });
+    }
+
+    if (normalizedUser && !mongoose.Types.ObjectId.isValid(normalizedUser)) {
+      const userRegex = new RegExp(normalizedUser, "i");
+      pipeline.push({
+        $match: {
+          $or: [
+            { "employee.firstName": userRegex },
+            { "employee.lastName": userRegex },
+            { "employee.username": userRegex },
+            { "employee.email": userRegex },
+            { employeeName: userRegex },
+            { employeeNameResolved: userRegex },
+          ],
+        },
+      });
+    }
+
+    if (normalizedProperty && !mongoose.Types.ObjectId.isValid(normalizedProperty)) {
+      const propertyRegex = new RegExp(normalizedProperty, "i");
+      pipeline.push({
+        $match: {
+          $or: [{ "property.propertyName": propertyRegex }],
+        },
+      });
+    }
+
+    if (search) {
+      const searchRegex = new RegExp(search, "i");
+      pipeline.push({
+        $match: {
+          $or: [
+            { employeeName: searchRegex },
+            { "checkpoint.name": searchRegex },
+            { "checkpoint.barcodeId": searchRegex },
+            { "property.propertyName": searchRegex },
+            { "building.name": searchRegex },
+          ],
+        },
+      });
+    }
+
+    const totalRecords = (
+      await ScanEvent.aggregate([...pipeline, { $count: "count" }])
+    )[0]?.count || 0;
+
+    if (totalRecords === 0) {
+      const qrMatch = {};
+      if (match.scannedAt) qrMatch.scannedAt = match.scannedAt;
+      if (effectiveEmployeeId && mongoose.Types.ObjectId.isValid(effectiveEmployeeId)) {
+        qrMatch.scannedBy = new mongoose.Types.ObjectId(effectiveEmployeeId);
+      }
+
+      const qrPipeline = [
+        { $match: qrMatch },
+        {
+          $lookup: {
+            from: "bintags",
+            localField: "binTag",
+            foreignField: "_id",
+            as: "binTag",
+          },
+        },
+        { $unwind: "$binTag" },
+      ];
+
+      if (effectivePropertyId && mongoose.Types.ObjectId.isValid(effectivePropertyId)) {
+        qrPipeline.push({
+          $match: { "binTag.property": new mongoose.Types.ObjectId(effectivePropertyId) },
+        });
+      }
+
+      if (activity) {
+        const normalized = String(activity).trim().toLowerCase();
+        if (normalized.includes("route check")) {
+          qrPipeline.push({ $match: { "binTag.type": "Route Checkpoint" } });
+        } else if (normalized.includes("violation")) {
+          qrPipeline.push({ $match: { "binTag.type": { $ne: "Route Checkpoint" } } });
+        } else {
+          qrPipeline.push({ $match: { _id: null } });
+        }
+      }
+
+      qrPipeline.push(
+        {
+          $group: {
+            _id: {
+              employee: "$scannedBy",
+              binTag: "$binTag._id",
+              date: {
+                $dateToString: { format: "%Y-%m-%d", date: "$scannedAt" },
+              },
+            },
+            firstScan: { $min: "$scannedAt" },
+            lastScan: { $max: "$scannedAt" },
+            scanCount: { $sum: 1 },
+            createdAt: { $min: "$createdAt" },
+            updatedAt: { $max: "$updatedAt" },
+          },
+        },
+        {
+          $addFields: {
+            checkOutResolved: {
+              $cond: [{ $gt: ["$scanCount", 1] }, "$lastScan", null],
+            },
+            serviceDurationSeconds: {
+              $cond: [
+                { $gt: ["$scanCount", 1] },
+                { $divide: [{ $subtract: ["$lastScan", "$firstScan"] }, 1000] },
+                null,
+              ],
+            },
+          },
+        },
+        {
+          $lookup: {
+            from: "employees",
+            localField: "_id.employee",
+            foreignField: "_id",
+            as: "employee",
+          },
+        },
+        { $unwind: { path: "$employee", preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: "users",
+            localField: "_id.employee",
+            foreignField: "_id",
+            as: "userAccount",
+          },
+        },
+        { $unwind: { path: "$userAccount", preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: "propertymanagers",
+            localField: "_id.employee",
+            foreignField: "_id",
+            as: "managerAccount",
+          },
+        },
+        { $unwind: { path: "$managerAccount", preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: "bintags",
+            localField: "_id.binTag",
+            foreignField: "_id",
+            as: "binTag",
+          },
+        },
+        { $unwind: { path: "$binTag", preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: "properties",
+            localField: "binTag.property",
+            foreignField: "_id",
+            as: "property",
+          },
+        },
+        { $unwind: { path: "$property", preserveNullAndEmptyArrays: true } },
+        {
+          $addFields: {
+            employeeName: {
+              $let: {
+                vars: {
+                  fullName: {
+                    $trim: {
+                      input: {
+                        $concat: [
+                          { $ifNull: ["$employee.firstName", ""] },
+                          " ",
+                          { $ifNull: ["$employee.lastName", ""] },
+                        ],
+                      },
+                    },
+                  },
+                },
+                in: {
+                  $ifNull: [
+                    {
+                      $cond: [
+                        { $ne: ["$$fullName", ""] },
+                        "$$fullName",
+                        { $ifNull: ["$employee.username", "$employee.email"] },
+                      ],
+                    },
+                    "",
+                  ],
+                },
+              },
+            },
+            userName: {
+              $let: {
+                vars: {
+                  fullName: {
+                    $trim: {
+                      input: {
+                        $concat: [
+                          { $ifNull: ["$userAccount.firstName", ""] },
+                          " ",
+                          { $ifNull: ["$userAccount.lastName", ""] },
+                        ],
+                      },
+                    },
+                  },
+                },
+                in: {
+                  $ifNull: [
+                    {
+                      $cond: [
+                        { $ne: ["$$fullName", ""] },
+                        "$$fullName",
+                        { $ifNull: ["$userAccount.username", "$userAccount.email"] },
+                      ],
+                    },
+                    "",
+                  ],
+                },
+              },
+            },
+            managerName: {
+              $let: {
+                vars: {
+                  fullName: {
+                    $trim: {
+                      input: {
+                        $concat: [
+                          { $ifNull: ["$managerAccount.firstName", ""] },
+                          " ",
+                          { $ifNull: ["$managerAccount.lastName", ""] },
+                        ],
+                      },
+                    },
+                  },
+                },
+                in: {
+                  $ifNull: [
+                    {
+                      $cond: [
+                        { $ne: ["$$fullName", ""] },
+                        "$$fullName",
+                        {
+                          $ifNull: [
+                            "$managerAccount.username",
+                            "$managerAccount.email",
+                          ],
+                        },
+                      ],
+                    },
+                    "",
+                  ],
+                },
+              },
+            },
+            employeeNameResolved: {
+              $let: {
+                vars: {
+                  e: { $ifNull: ["$employeeName", ""] },
+                  u: { $ifNull: ["$userName", ""] },
+                  m: { $ifNull: ["$managerName", ""] },
+                },
+                in: {
+                  $cond: [
+                    { $ne: ["$$e", ""] },
+                    "$$e",
+                    {
+                      $cond: [
+                        { $ne: ["$$u", ""] },
+                        "$$u",
+                        {
+                          $cond: [
+                            { $ne: ["$$m", ""] },
+                            "$$m",
+                            "Unknown Employee",
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }
+      );
+
+      if (scanBy) {
+        const scanByRegex = new RegExp(scanBy, "i");
+        const scanByMatch = {
+          $or: [
+            { "employee.firstName": scanByRegex },
+            { "employee.lastName": scanByRegex },
+            { "employee.username": scanByRegex },
+            { "employee.email": scanByRegex },
+            { "userAccount.firstName": scanByRegex },
+            { "userAccount.lastName": scanByRegex },
+            { "userAccount.username": scanByRegex },
+            { "userAccount.email": scanByRegex },
+            { "managerAccount.firstName": scanByRegex },
+            { "managerAccount.lastName": scanByRegex },
+            { "managerAccount.username": scanByRegex },
+            { "managerAccount.email": scanByRegex },
+            { employeeName: scanByRegex },
+            { userName: scanByRegex },
+            { managerName: scanByRegex },
+            { employeeNameResolved: scanByRegex },
+          ],
+        };
+        if (mongoose.Types.ObjectId.isValid(scanBy)) {
+          scanByMatch.$or.push({
+            "employee._id": new mongoose.Types.ObjectId(scanBy),
+          });
+          scanByMatch.$or.push({
+            "userAccount._id": new mongoose.Types.ObjectId(scanBy),
+          });
+          scanByMatch.$or.push({
+            "managerAccount._id": new mongoose.Types.ObjectId(scanBy),
+          });
+        }
+        qrPipeline.push({ $match: scanByMatch });
+      }
+
+      if (normalizedUser && !mongoose.Types.ObjectId.isValid(normalizedUser)) {
+        const userRegex = new RegExp(normalizedUser, "i");
+        qrPipeline.push({
+          $match: {
+            $or: [
+              { "employee.firstName": userRegex },
+              { "employee.lastName": userRegex },
+              { "employee.username": userRegex },
+              { "employee.email": userRegex },
+              { "userAccount.firstName": userRegex },
+              { "userAccount.lastName": userRegex },
+              { "userAccount.username": userRegex },
+              { "userAccount.email": userRegex },
+              { "managerAccount.firstName": userRegex },
+              { "managerAccount.lastName": userRegex },
+              { "managerAccount.username": userRegex },
+              { "managerAccount.email": userRegex },
+              { employeeName: userRegex },
+              { userName: userRegex },
+              { managerName: userRegex },
+              { employeeNameResolved: userRegex },
+            ],
+          },
+        });
+      }
+
+      if (normalizedProperty && !mongoose.Types.ObjectId.isValid(normalizedProperty)) {
+        const propertyRegex = new RegExp(normalizedProperty, "i");
+        qrPipeline.push({
+          $match: {
+            $or: [
+              { "property.propertyName": propertyRegex },
+              { "binTag.propertySnapshot.propertyName": propertyRegex },
+            ],
+          },
+        });
+      }
+
+      if (search) {
+        const searchRegex = new RegExp(search, "i");
+        qrPipeline.push({
+          $match: {
+            $or: [
+              { employeeName: searchRegex },
+              { "binTag.unitNumber": searchRegex },
+              { "binTag.barcode": searchRegex },
+              { "binTag.building.name": searchRegex },
+              { "property.propertyName": searchRegex },
+            ],
+          },
+        });
+      }
+
+      const qrTotal = (
+        await QrScanLog.aggregate([...qrPipeline, { $count: "count" }])
+      )[0]?.count || 0;
+
+      const qrReport = await QrScanLog.aggregate([
+        ...qrPipeline,
+        { $sort: { firstScan: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $project: {
+            _id: 0,
+            user: "$employeeNameResolved",
+            propertyName: {
+              $ifNull: ["$property.propertyName", "$binTag.propertySnapshot.propertyName"],
+            },
+            barcodeId: "$binTag.barcode",
+            checkIn: "$firstScan",
+            checkOut: "$checkOutResolved",
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        },
+      ]);
+
+      return res.json({
+        page,
+        limit,
+        totalRecords: qrTotal,
+        totalPages: Math.ceil(qrTotal / limit),
+        data: qrReport,
+      });
+    }
+
+    const report = await ScanEvent.aggregate([
+      ...pipeline,
+      { $sort: { firstScan: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      {
         $project: {
           _id: 0,
-          employeeName: "$employee.name",
+          user: "$employeeNameResolved",
+          propertyName: { $ifNull: ["$property.propertyName", "Unknown Property"] },
           barcodeId: "$checkpoint.barcodeId",
           checkIn: "$firstScan",
-          checkOut: "$lastScan",
-          serviceDurationSeconds: 1,
+          checkOut: "$checkOutResolved",
+          createdAt: 1,
+          updatedAt: 1,
         },
       },
     ]);
@@ -262,6 +801,7 @@ exports.serviceReport = async (req, res) => {
       propertyId,
       activity,
       employeeId,
+      scanBy,
       search,
       page = 1,
       limit = 10,
@@ -270,24 +810,32 @@ exports.serviceReport = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const match = {};
+    const normalizedActivity = typeof activity === "string" ? activity.trim() : "";
+    const normalizedScanBy = typeof scanBy === "string" ? scanBy.trim() : scanBy;
+    const normalizedSearch = typeof search === "string" ? search.trim() : search;
 
     if (date) {
+      const dayStart = new Date(`${date}T00:00:00.000Z`);
+      const dayEnd = new Date(`${date}T23:59:59.999Z`);
       match.scannedAt = {
-        $gte: new Date(`${date}T00:00:00`),
-        $lte: new Date(`${date}T23:59:59`),
+        $gte: dayStart,
+        $lte: dayEnd,
       };
     }
 
-    if (propertyId) {
+    if (propertyId && mongoose.Types.ObjectId.isValid(propertyId)) {
       match.property = new mongoose.Types.ObjectId(propertyId);
     }
 
-    if (employeeId) {
+    if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
       match.employee = new mongoose.Types.ObjectId(employeeId);
     }
 
-    if (activity) {
-      match.activityType = activity; // stored in ScanEvent
+    if (normalizedActivity) {
+      match.activityType = {
+        $regex: `^${normalizedActivity.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+        $options: "i",
+      };
     }
 
     const pipeline = [
@@ -332,15 +880,56 @@ exports.serviceReport = async (req, res) => {
         },
       },
       { $unwind: "$employee" },
+      {
+        $addFields: {
+          scanBy: {
+            $trim: {
+              input: {
+                $concat: [
+                  { $ifNull: ["$employee.firstName", ""] },
+                  " ",
+                  { $ifNull: ["$employee.lastName", ""] },
+                ],
+              },
+            },
+          },
+        },
+      },
     ];
 
-    if (search) {
+    if (normalizedScanBy) {
+      const scanByRegex = new RegExp(normalizedScanBy, "i");
+      const scanByMatch = {
+        $or: [
+          { "employee.firstName": scanByRegex },
+          { "employee.lastName": scanByRegex },
+          { "employee.username": scanByRegex },
+          { "employee.email": scanByRegex },
+          { scanBy: scanByRegex },
+        ],
+      };
+      if (mongoose.Types.ObjectId.isValid(normalizedScanBy)) {
+        scanByMatch.$or.push({
+          "employee._id": new mongoose.Types.ObjectId(normalizedScanBy),
+        });
+      }
+      pipeline.push({ $match: scanByMatch });
+    }
+
+    if (normalizedSearch) {
+      const searchRegex = new RegExp(normalizedSearch, "i");
       pipeline.push({
         $match: {
           $or: [
-            { "property.name": { $regex: search, $options: "i" } },
-            { "building.name": { $regex: search, $options: "i" } },
-            { "employee.name": { $regex: search, $options: "i" } },
+            { "property.propertyName": searchRegex },
+            { "building.name": searchRegex },
+            { "checkpoint.name": searchRegex },
+            { "checkpoint.barcodeId": searchRegex },
+            { "employee.firstName": searchRegex },
+            { "employee.lastName": searchRegex },
+            { "employee.username": searchRegex },
+            { "employee.email": searchRegex },
+            { scanBy: searchRegex },
           ],
         },
       });
@@ -350,6 +939,150 @@ exports.serviceReport = async (req, res) => {
       await ScanEvent.aggregate([...pipeline, { $count: "count" }])
     )[0]?.count || 0;
 
+    if (totalRecords === 0) {
+      const qrMatch = {};
+      if (match.scannedAt) qrMatch.scannedAt = match.scannedAt;
+      if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
+        qrMatch.scannedBy = new mongoose.Types.ObjectId(employeeId);
+      }
+
+      const qrPipeline = [
+        { $match: qrMatch },
+        {
+          $lookup: {
+            from: "bintags",
+            localField: "binTag",
+            foreignField: "_id",
+            as: "binTag",
+          },
+        },
+        { $unwind: "$binTag" },
+        {
+          $lookup: {
+            from: "properties",
+            localField: "binTag.property",
+            foreignField: "_id",
+            as: "property",
+          },
+        },
+        { $unwind: "$property" },
+        {
+          $lookup: {
+            from: "employees",
+            localField: "scannedBy",
+            foreignField: "_id",
+            as: "employee",
+          },
+        },
+        { $unwind: { path: "$employee", preserveNullAndEmptyArrays: true } },
+        {
+          $addFields: {
+            scanBy: {
+              $trim: {
+                input: {
+                  $concat: [
+                    { $ifNull: ["$employee.firstName", ""] },
+                    " ",
+                    { $ifNull: ["$employee.lastName", ""] },
+                  ],
+                },
+              },
+            },
+            activity: {
+              $cond: [
+                { $eq: ["$binTag.type", "Route Checkpoint"] },
+                "Route Check Point",
+                "Violation Reported",
+              ],
+            },
+          },
+        },
+      ];
+
+      if (propertyId && mongoose.Types.ObjectId.isValid(propertyId)) {
+        qrPipeline.push({
+          $match: { "property._id": new mongoose.Types.ObjectId(propertyId) },
+        });
+      }
+
+      if (normalizedActivity) {
+        const lower = normalizedActivity.toLowerCase();
+        if (lower.includes("route check")) {
+          qrPipeline.push({ $match: { "binTag.type": "Route Checkpoint" } });
+        } else if (lower.includes("violation")) {
+          qrPipeline.push({ $match: { "binTag.type": { $ne: "Route Checkpoint" } } });
+        } else {
+          qrPipeline.push({ $match: { _id: null } });
+        }
+      }
+
+      if (normalizedScanBy) {
+        const scanByRegex = new RegExp(normalizedScanBy, "i");
+        const scanByMatch = {
+          $or: [
+            { "employee.firstName": scanByRegex },
+            { "employee.lastName": scanByRegex },
+            { "employee.username": scanByRegex },
+            { "employee.email": scanByRegex },
+            { scanBy: scanByRegex },
+          ],
+        };
+        if (mongoose.Types.ObjectId.isValid(normalizedScanBy)) {
+          scanByMatch.$or.push({
+            "employee._id": new mongoose.Types.ObjectId(normalizedScanBy),
+          });
+        }
+        qrPipeline.push({ $match: scanByMatch });
+      }
+
+      if (normalizedSearch) {
+        const searchRegex = new RegExp(normalizedSearch, "i");
+        qrPipeline.push({
+          $match: {
+            $or: [
+              { "property.propertyName": searchRegex },
+              { "binTag.building.name": searchRegex },
+              { "binTag.unitNumber": searchRegex },
+              { "snapshot.unitNumber": searchRegex },
+              { "snapshot.barcode": searchRegex },
+              { scanBy: searchRegex },
+            ],
+          },
+        });
+      }
+
+      const qrTotal = (
+        await QrScanLog.aggregate([...qrPipeline, { $count: "count" }])
+      )[0]?.count || 0;
+
+      qrPipeline.push(
+        { $sort: { scannedAt: -1 } },
+        { $skip: Number(skip) },
+        { $limit: Number(limit) },
+        {
+          $project: {
+            _id: 0,
+            property: "$property.propertyName",
+            buildingName: "$binTag.building.name",
+            unit: { $ifNull: ["$binTag.unitNumber", "$snapshot.unitNumber"] },
+            scanDate: "$scannedAt",
+            activity: "$activity",
+            volume: null,
+            scanBy: "$scanBy",
+          },
+        }
+      );
+
+      const qrData = await QrScanLog.aggregate(qrPipeline);
+      return res.json({
+        page: Number(page),
+        limit: Number(limit),
+        totalRecords: qrTotal,
+        totalPages: Math.ceil(qrTotal / limit),
+        data: qrData,
+      });
+    }
+
     pipeline.push(
       { $sort: { scannedAt: -1 } },
       { $skip: Number(skip) },
@@ -357,13 +1090,13 @@ exports.serviceReport = async (req, res) => {
       {
         $project: {
           _id: 0,
-          property: "$property.name",
+          property: "$property.propertyName",
           buildingName: "$building.name",
           unit: "$checkpoint.name",
           scanDate: "$scannedAt",
           activity: "$activityType",
           volume: "$volume",
-          scanBy: "$employee.name",
+          scanBy: "$scanBy",
         },
       }
     );
@@ -379,6 +1112,92 @@ exports.serviceReport = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+/* ===============================
+PROPERTY CHECK IN/OUT (LIST)
+================================ */
+exports.getPropertyCheckInOut = async (req, res) => {
+  try {
+    const { propertyId, employeeId, date, startDate, endDate } = req.query;
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+    const skip = (page - 1) * limit;
+
+    const query = {};
+
+    if (propertyId) {
+      if (!mongoose.Types.ObjectId.isValid(propertyId)) {
+        return res.status(400).json({ message: "Invalid propertyId" });
+      }
+      query.property = new mongoose.Types.ObjectId(propertyId);
+    }
+
+    if (employeeId) {
+      if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+        return res.status(400).json({ message: "Invalid employeeId" });
+      }
+      query.employee = new mongoose.Types.ObjectId(employeeId);
+    }
+
+    if (date) {
+      query.checkIn = {
+        $gte: new Date(`${date}T00:00:00.000Z`),
+        $lte: new Date(`${date}T23:59:59.999Z`),
+      };
+    } else if (startDate || endDate) {
+      query.checkIn = {};
+      if (startDate) query.checkIn.$gte = new Date(startDate);
+      if (endDate) query.checkIn.$lte = new Date(endDate);
+    }
+
+    const allowedPropertyIds = await resolvePropertyIdsForReport(req);
+    if (Array.isArray(allowedPropertyIds)) {
+      if (!allowedPropertyIds.length) {
+        return res.json({
+          page,
+          limit,
+          totalRecords: 0,
+          totalPages: 0,
+          data: [],
+        });
+      }
+      if (query.property) {
+        const isAllowed = allowedPropertyIds.some(
+          (id) => id.toString() === query.property.toString()
+        );
+        if (!isAllowed) {
+          return res.status(403).json({ message: "Access denied for this property" });
+        }
+      } else {
+        query.property = {
+          $in: allowedPropertyIds.map((id) => new mongoose.Types.ObjectId(id)),
+        };
+      }
+    }
+
+    if (req.userType === "EMPLOYEE") {
+      query.employee = req.user._id;
+    }
+
+    const totalRecords = await PropertyCheckLog.countDocuments(query);
+    const data = await PropertyCheckLog.find(query)
+      .populate("property", "propertyName address")
+      .populate("employee", "firstName lastName email username")
+      .sort({ checkIn: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return res.json({
+      page,
+      limit,
+      totalRecords,
+      totalPages: Math.ceil(totalRecords / limit),
+      data,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };
 

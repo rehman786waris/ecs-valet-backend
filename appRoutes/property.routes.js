@@ -27,6 +27,20 @@ router.get("/", adminManagerEmployeeAuth, propertyController.getProperties);
 // Get property by ID
 router.get("/:id", adminManagerEmployeeAuth, propertyController.getPropertyById);
 
+// Assign property (employees + optional customer)
+router.put("/:id/assign", adminManagerEmployeeAuth, propertyController.assignProperty);
+
+router.get(
+  "/:id/checkin-checkout",
+  adminManagerEmployeeAuth,
+  propertyController.getPropertyCheckInOut
+);
+router.post(
+  "/checkin-checkout/by-barcode",
+  adminManagerEmployeeAuth,
+  propertyController.propertyCheckInOutByBarcode
+);
+
 // Update property
 router.put(
   "/:id",

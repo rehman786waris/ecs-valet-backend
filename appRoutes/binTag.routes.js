@@ -8,6 +8,7 @@ const adminAuth = require("../middlewares/adminAuthMiddleware");
 ====================== */
 
 router.post("/", adminAuth, controller.createBinTag);
+router.patch("/:id/type", adminAuth, controller.updateBinTagType);
 router.delete("/bulk-delete", adminAuth, controller.bulkDeleteBinTags);
 router.get("/", adminAuth, controller.getBinTags);
 router.get("/:id", adminAuth, controller.getBinTagById);

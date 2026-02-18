@@ -20,7 +20,10 @@ const normalizeBinTagType = (value) => {
   if (
     normalized === "route checkpoint" ||
     normalized === "route_checkpoint" ||
-    normalized === "routecheckpoint"
+    normalized === "routecheckpoint" ||
+    normalized === "checkpoint" ||
+    normalized === "check point" ||
+    normalized === "chickpoint"
   ) {
     return "Route Checkpoint";
   }
@@ -93,6 +96,50 @@ exports.createBinTag = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+/* =====================================================
+   CREATE BIN TAG (MAKE AS UNIT / CHECKPOINT)
+===================================================== */
+/* =====================================================
+   UPDATE BIN TAG TYPE (UNIT / CHECKPOINT)
+===================================================== */
+exports.updateBinTagType = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid bin tag id" });
+    }
+
+    const binTag = await BinTag.findOne({
+      _id: req.params.id,
+      company: req.user.company,
+      isDeleted: false,
+    });
+
+    if (!binTag) {
+      return res.status(404).json({ message: "Bin tag not found" });
+    }
+
+    const { makeAs, type } = req.body || {};
+    const normalizedType = normalizeBinTagType(makeAs || type);
+
+    if (!normalizedType) {
+      return res.status(400).json({
+        message: "Invalid type. Use unit or Route Checkpoint",
+      });
+    }
+
+    binTag.type = normalizedType;
+    await binTag.save();
+
+    return res.status(200).json({
+      message: "Bin tag type updated successfully",
+      data: binTag,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
 
 /* =====================================================
    GET ALL BIN TAGS

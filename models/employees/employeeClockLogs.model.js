@@ -53,11 +53,10 @@ const employeeClockLogSchema = new mongoose.Schema(
 );
 
 /* ❌ PREVENT INVALID CLOCK */
-employeeClockLogSchema.pre("save", function (next) {
+employeeClockLogSchema.pre("save", function () {
   if (this.clockOut && this.clockOut < this.clockIn) {
-    return next(new Error("Clock-out cannot be before clock-in"));
+    throw new Error("Clock-out cannot be before clock-in");
   }
-  next();
 });
 
 /* ❌ ONE OPEN SESSION PER EMPLOYEE */

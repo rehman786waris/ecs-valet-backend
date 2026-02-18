@@ -51,13 +51,12 @@ const employeeClockLogSchema = new mongoose.Schema(
 );
 
 // Auto-calculate duration
-employeeClockLogSchema.pre("save", function (next) {
+employeeClockLogSchema.pre("save", function () {
   if (this.checkIn && this.checkOut) {
     this.durationMinutes = Math.floor(
       (this.checkOut - this.checkIn) / 60000
     );
   }
-  next();
 });
 
 // Reporting indexes

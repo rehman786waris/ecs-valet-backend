@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 const Property = require("../models/properties/property.model");
 const Building = require("../models/buildings.model");
 const BinTag = require("../models/properties/binTag.model");
+const Employee = require("../models/employees/employee.model");
+const Customer = require("../models/customer.model");
+const PropertyManager = require("../models/propertyManagerModel");
+const PropertyCheckLog = require("../models/reports/propertyCheckLog.model");
 
 const generateAndUploadQRCode = require("../utils/generateAndUploadQRCode");
 
@@ -53,6 +57,17 @@ const generateBarcode = (propertyId, bIndex, uIndex) =>
 
 const generatePropertyBarcode = (propertyId) =>
   `PROP-${propertyId.toString().slice(-6)}`;
+
+const generateUniquePropertyBarcode = async (propertyId) => {
+  let barcode = generatePropertyBarcode(propertyId);
+  let exists = await Property.exists({ propertyBarcode: barcode });
+  while (exists) {
+    const randomSuffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+    barcode = `${generatePropertyBarcode(propertyId)}-${randomSuffix}`;
+    exists = await Property.exists({ propertyBarcode: barcode });
+  }
+  return barcode;
+};
 
 const parseBoolean = (v) => v === true || v === "true" || v === "on";
 const parseNumber = (v) => {
@@ -133,6 +148,35 @@ const resolveEmployeeCompanyId = async (req) => {
   return property?.company || null;
 };
 
+const canAccessProperty = async (req, property) => {
+  if (!property) return false;
+
+  if (req.userType === "PROPERTY_MANAGER") {
+    const propertyIds = req.user.properties?.length
+      ? req.user.properties
+      : await Property.find({ propertyManager: req.user._id }).distinct("_id");
+    const allowedIds = new Set(propertyIds.map((id) => id.toString()));
+    return allowedIds.has(property._id.toString());
+  }
+
+  if (req.userType === "EMPLOYEE") {
+    const employeePropertyIds =
+      Array.isArray(req.user.properties) && req.user.properties.length
+        ? req.user.properties
+        : req.user.property
+          ? [req.user.property]
+          : [];
+    const allowedIds = new Set(employeePropertyIds.map((id) => id.toString()));
+    return allowedIds.has(property._id.toString());
+  }
+
+  if (req.user?.company) {
+    return property.company?.toString() === req.user.company?.toString();
+  }
+
+  return false;
+};
+
 /* =====================================================
    CREATE PROPERTY (BUILDINGS + BINTAGS + QR)
 ===================================================== */
@@ -186,7 +230,7 @@ exports.createProperty = async (req, res) => {
     });
 
     if (!property.propertyBarcode) {
-      const propertyBarcode = generatePropertyBarcode(property._id);
+      const propertyBarcode = await generateUniquePropertyBarcode(property._id);
       const propertyQrCodeImage = await generateAndUploadQRCode(propertyBarcode);
       property.propertyBarcode = propertyBarcode;
       property.propertyQrCodeImage = propertyQrCodeImage;
@@ -343,11 +387,36 @@ exports.getProperties = async (req, res) => {
       .skip((page - 1) * limit)
       .limit(Number(limit));
 
+    const propertyIds = data.map((property) => property._id);
+    const employees = propertyIds.length
+      ? await Employee.find({
+          properties: { $in: propertyIds },
+          isDeleted: false,
+        }).select("_id firstName lastName email username property properties isActive")
+      : [];
+
+    const employeesByProperty = new Map();
+    for (const employee of employees) {
+      for (const propertyId of employee.properties || []) {
+        const key = propertyId.toString();
+        if (!employeesByProperty.has(key)) employeesByProperty.set(key, []);
+        employeesByProperty.get(key).push(employee);
+      }
+    }
+
+    const enrichedData = data.map((property) => {
+      const key = property._id.toString();
+      return {
+        ...property.toObject(),
+        employees: employeesByProperty.get(key) || [],
+      };
+    });
+
     const total = await Property.countDocuments(query);
 
     res.json({
       success: true,
-      data,
+      data: enrichedData,
       pagination: { total, page: Number(page), limit: Number(limit) },
     });
   } catch (error) {
@@ -506,5 +575,309 @@ exports.deleteProperty = async (req, res) => {
     res.json({ success: true, message: "Property deleted successfully" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* =====================================================
+   ASSIGN PROPERTY (EMPLOYEES + OPTIONAL CUSTOMER + PM)
+===================================================== */
+exports.assignProperty = async (req, res) => {
+  try {
+    if (req.userType === "EMPLOYEE") {
+      return res
+        .status(403)
+        .json({ success: false, message: "Insufficient permissions" });
+    }
+
+    const property = await Property.findOne(await buildPropertyAccessQuery(req));
+    if (!property) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Property not found" });
+    }
+
+    const ids = Array.isArray(req.body.employeeIds)
+      ? req.body.employeeIds
+      : req.body.employeeId
+        ? [req.body.employeeId]
+        : [];
+    const uniqueEmployeeIds = [...new Set(ids.map(String))];
+
+    if (uniqueEmployeeIds.length) {
+      const employees = await Employee.find({
+        _id: { $in: uniqueEmployeeIds },
+        isDeleted: false,
+      }).select("_id property properties");
+
+      if (employees.length !== uniqueEmployeeIds.length) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid employee selection" });
+      }
+
+      const shouldReplace =
+        req.body.replace === undefined || req.body.replace === true || req.body.replace === "true";
+      const propertyIdStr = property._id.toString();
+
+      if (shouldReplace) {
+        const currentlyAssigned = await Employee.find({
+          properties: property._id,
+          isDeleted: false,
+          _id: { $nin: uniqueEmployeeIds },
+        }).select("_id property properties");
+
+        for (const emp of currentlyAssigned) {
+          const nextProperties = (emp.properties || []).filter(
+            (p) => p.toString() !== propertyIdStr
+          );
+          emp.properties = nextProperties;
+          if (emp.property?.toString() === propertyIdStr) {
+            emp.property = nextProperties[0] || null;
+          }
+          await emp.save();
+        }
+      }
+
+      for (const emp of employees) {
+        const existing = new Set((emp.properties || []).map((p) => p.toString()));
+        existing.add(propertyIdStr);
+        emp.properties = [...existing];
+        if (!emp.property) {
+          emp.property = property._id;
+        }
+        await emp.save();
+      }
+    }
+
+    if (req.body.customerId !== undefined) {
+      const customer = await Customer.findById(req.body.customerId).select("_id");
+      if (!customer) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid customer selection" });
+      }
+      property.customer = customer._id;
+      await property.save();
+    }
+
+    if (req.body.propertyManagerId !== undefined) {
+      const pmId = req.body.propertyManagerId;
+      let nextManager = null;
+
+      if (pmId !== null && pmId !== "") {
+        nextManager = await PropertyManager.findOne({
+          _id: pmId,
+          isDeleted: false,
+          isEnabled: true,
+        }).select("_id");
+
+        if (!nextManager) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid property manager selection",
+          });
+        }
+      }
+
+      if (nextManager) {
+        await PropertyManager.updateMany(
+          { properties: property._id, _id: { $ne: nextManager._id } },
+          { $pull: { properties: property._id } }
+        );
+        await PropertyManager.updateOne(
+          { _id: nextManager._id },
+          { $addToSet: { properties: property._id } }
+        );
+      } else {
+        await PropertyManager.updateMany(
+          { properties: property._id },
+          { $pull: { properties: property._id } }
+        );
+      }
+
+      property.propertyManager = nextManager ? nextManager._id : null;
+      await property.save();
+    }
+
+    const assignedEmployees = await Employee.find({
+      properties: property._id,
+      isDeleted: false,
+    }).select("_id firstName lastName email username property properties");
+
+    const data = await Property.findById(property._id)
+      .populate("customer", "name email")
+      .populate("propertyManager", "firstName lastName");
+
+    return res.json({
+      success: true,
+      message: "Property assignment updated successfully",
+      data: {
+        property: data,
+        employees: assignedEmployees,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* =====================================================
+   PROPERTY CHECK IN/OUT (LIST)
+===================================================== */
+exports.getPropertyCheckInOut = async (req, res) => {
+  try {
+    const property = await Property.findOne(await buildPropertyAccessQuery(req)).select(
+      "_id"
+    );
+    if (!property) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Property not found" });
+    }
+
+    const { employeeId, date, startDate, endDate } = req.query;
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+    const skip = (page - 1) * limit;
+
+    const query = { property: property._id };
+
+    if (req.userType === "EMPLOYEE") {
+      query.employee = req.user._id;
+    } else if (employeeId) {
+      if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid employeeId" });
+      }
+      query.employee = new mongoose.Types.ObjectId(employeeId);
+    }
+
+    if (date) {
+      query.checkIn = {
+        $gte: new Date(`${date}T00:00:00.000Z`),
+        $lte: new Date(`${date}T23:59:59.999Z`),
+      };
+    } else if (startDate || endDate) {
+      query.checkIn = {};
+      if (startDate) query.checkIn.$gte = new Date(startDate);
+      if (endDate) query.checkIn.$lte = new Date(endDate);
+    }
+
+    const total = await PropertyCheckLog.countDocuments(query);
+    const data = await PropertyCheckLog.find(query)
+      .populate("employee", "firstName lastName email username")
+      .sort({ checkIn: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return res.json({
+      success: true,
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* =====================================================
+   PROPERTY CHECK IN/OUT BY BARCODE (CREATE)
+===================================================== */
+exports.propertyCheckInOutByBarcode = async (req, res) => {
+  try {
+    const { barcode, action, employeeId, timestamp } = req.body;
+
+    if (!barcode || !action) {
+      return res.status(400).json({
+        success: false,
+        message: "barcode and action are required",
+      });
+    }
+
+    const property = await Property.findOne({
+      propertyBarcode: String(barcode).trim(),
+      isDeleted: false,
+    }).select("_id company propertyBarcode propertyName");
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found for this barcode",
+      });
+    }
+
+    const hasAccess = await canAccessProperty(req, property);
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied for this property",
+      });
+    }
+
+    const normalizedAction = String(action).trim().toUpperCase();
+    if (!["CHECK_IN", "CHECK_OUT"].includes(normalizedAction)) {
+      return res.status(400).json({
+        success: false,
+        message: "action must be CHECK_IN or CHECK_OUT",
+      });
+    }
+
+    const resolvedEmployeeId =
+      req.userType === "EMPLOYEE" ? req.user._id?.toString() : employeeId;
+    if (!resolvedEmployeeId || !mongoose.Types.ObjectId.isValid(resolvedEmployeeId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid employeeId is required",
+      });
+    }
+
+    const eventTime = timestamp ? new Date(timestamp) : new Date();
+    if (Number.isNaN(eventTime.getTime())) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid timestamp" });
+    }
+
+    if (normalizedAction === "CHECK_IN") {
+      const created = await PropertyCheckLog.create({
+        property: property._id,
+        employee: resolvedEmployeeId,
+        checkIn: eventTime,
+      });
+      return res.status(201).json({
+        success: true,
+        message: "Property check-in saved",
+        data: created,
+      });
+    }
+
+    const openLog = await PropertyCheckLog.findOne({
+      property: property._id,
+      employee: resolvedEmployeeId,
+      $or: [{ checkOut: { $exists: false } }, { checkOut: null }],
+    }).sort({ checkIn: -1 });
+
+    if (!openLog) {
+      return res.status(404).json({
+        success: false,
+        message: "No open check-in found for checkout",
+      });
+    }
+
+    openLog.checkOut = eventTime;
+    await openLog.save();
+
+    return res.json({
+      success: true,
+      message: "Property check-out saved",
+      data: openLog,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
