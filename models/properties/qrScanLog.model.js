@@ -20,6 +20,12 @@ const qrScanLogSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
     },
+    scannedBySnapshot: {
+      firstName: String,
+      lastName: String,
+      email: String,
+      username: String,
+    },
 
     scannedAt: {
       type: Date,
@@ -37,6 +43,10 @@ const qrScanLogSchema = new mongoose.Schema(
       unitNumber: String,
       units: [
         {
+          _id: false,
+          unitId: {
+            type: mongoose.Schema.Types.ObjectId,
+          },
           unitNumber: {
             type: String,
             trim: true,

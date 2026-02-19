@@ -2,6 +2,7 @@ const QrScanLog = require("../models/properties/qrScanLog.model");
 const BinTag = require("../models/properties/binTag.model");
 const RecycleReport = require("../models/reports/recycleReport.model");
 const Property = require("../models/properties/property.model");
+const Building = require("../models/buildings.model");
 
 const getEmployeeCompanyId = async (req) => {
   let companyId = req.user.company;
@@ -33,11 +34,18 @@ const getPropertyIdsForManager = async (manager) => {
   return ids;
 };
 
+const escapeRegex = (value) =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /* =====================================================
    CREATE SCAN LOG (AUTO – MOBILE SCAN)
 ===================================================== */
 exports.createScanLog = async (req, res) => {
   try {
+    if (req.userType !== "EMPLOYEE") {
+      return res.status(403).json({ message: "Only employees can scan QR codes" });
+    }
+
     const { barcode, location } = req.body;
 
     if (!barcode) {
@@ -62,22 +70,65 @@ exports.createScanLog = async (req, res) => {
       return res.status(404).json({ message: "Invalid or inactive QR code" });
     }
 
+    const scanTime = new Date();
+    let unitId = null;
+
+    if (binTag.type === "unit" && binTag.unitNumber) {
+      const unitNumber = String(binTag.unitNumber).trim();
+      const unitRegex = new RegExp(`^${escapeRegex(unitNumber)}$`, "i");
+      const buildingQuery = {
+        property: binTag.property,
+        units: { $elemMatch: { unitNumber: unitRegex } },
+      };
+      if (binTag.building?.name) {
+        buildingQuery.name = binTag.building.name;
+      }
+
+      const building = await Building.findOne(buildingQuery);
+      if (building) {
+        const unit = building.units.find((u) =>
+          unitRegex.test(String(u.unitNumber || ""))
+        );
+        if (unit) {
+          unitId = unit._id;
+          if (unit.status) {
+            unit.status = false;
+            unit.checkOut = scanTime;
+          } else {
+            unit.status = true;
+            unit.checkIn = scanTime;
+            unit.checkOut = null;
+          }
+          await building.save();
+        }
+      }
+    }
+
     const scanLog = await QrScanLog.create({
       company: companyId,
       binTag: binTag._id,
       scannedBy: req.user._id,
+      scannedBySnapshot: {
+        firstName: req.user.firstName,
+        lastName: req.user.lastName,
+        email: req.user.email,
+        username: req.user.username,
+      },
+      scannedAt: scanTime,
       location,
       snapshot: {
         propertyName: binTag.propertySnapshot?.propertyName,
         unitNumber: binTag.unitNumber,
-        units: binTag.unitNumber ? [{ unitNumber: binTag.unitNumber }] : [],
+        units: binTag.unitNumber
+          ? [{ unitId, unitNumber: binTag.unitNumber }]
+          : [],
         barcode: binTag.barcode,
       },
     });
 
     // Update bin tag stats
     binTag.scanCount += 1;
-    binTag.lastScannedAt = new Date();
+    binTag.lastScannedAt = scanTime;
     binTag.lastScannedBy = req.user._id;
     await binTag.save();
 
@@ -100,7 +151,7 @@ exports.createScanLog = async (req, res) => {
     await RecycleReport.create({
       property: binTag.property,
       propertySnapshot: addressString || null,
-      scanDate: scanLog.scannedAt,
+      scanDate: scanTime,
       recycle: binTag.type !== "Route Checkpoint",
       contaminated: false,
       status,

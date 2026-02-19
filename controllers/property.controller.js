@@ -379,8 +379,8 @@ exports.getProperties = async (req, res) => {
     }
 
     const data = await Property.find(query)
-      .populate("customer", "name")
-      .populate("propertyManager", "firstName lastName")
+      .populate("customer", "name phone")
+      .populate("propertyManager", "firstName lastName mobile")
       .populate("redundantRouteService", "firstName lastName email username")
       .populate("buildings")
       .sort({ createdAt: -1 })
@@ -392,7 +392,9 @@ exports.getProperties = async (req, res) => {
       ? await Employee.find({
           properties: { $in: propertyIds },
           isDeleted: false,
-        }).select("_id firstName lastName email username property properties isActive")
+        }).select(
+          "_id firstName lastName email username mobile property properties isActive"
+        )
       : [];
 
     const employeesByProperty = new Map();
@@ -792,10 +794,10 @@ exports.propertyCheckInOutByBarcode = async (req, res) => {
   try {
     const { barcode, action, employeeId, timestamp } = req.body;
 
-    if (!barcode || !action) {
+    if (!barcode) {
       return res.status(400).json({
         success: false,
-        message: "barcode and action are required",
+        message: "barcode is required",
       });
     }
 
@@ -819,8 +821,14 @@ exports.propertyCheckInOutByBarcode = async (req, res) => {
       });
     }
 
-    const normalizedAction = String(action).trim().toUpperCase();
-    if (!["CHECK_IN", "CHECK_OUT"].includes(normalizedAction)) {
+    const normalizedAction =
+      action !== undefined && action !== null && String(action).trim() !== ""
+        ? String(action).trim().toUpperCase()
+        : null;
+    if (
+      normalizedAction &&
+      !["CHECK_IN", "CHECK_OUT"].includes(normalizedAction)
+    ) {
       return res.status(400).json({
         success: false,
         message: "action must be CHECK_IN or CHECK_OUT",
@@ -843,7 +851,29 @@ exports.propertyCheckInOutByBarcode = async (req, res) => {
         .json({ success: false, message: "Invalid timestamp" });
     }
 
-    if (normalizedAction === "CHECK_IN") {
+    const openLog = await PropertyCheckLog.findOne({
+      property: property._id,
+      employee: resolvedEmployeeId,
+      $or: [{ checkOut: { $exists: false } }, { checkOut: null }],
+    }).sort({ checkIn: -1 });
+
+    if (normalizedAction === "CHECK_OUT") {
+      if (!openLog) {
+        return res.status(404).json({
+          success: false,
+          message: "No open check-in found for checkout",
+        });
+      }
+      openLog.checkOut = eventTime;
+      await openLog.save();
+      return res.json({
+        success: true,
+        message: "Property check-out saved",
+        data: openLog,
+      });
+    }
+
+    if (normalizedAction === "CHECK_IN" || !openLog) {
       const created = await PropertyCheckLog.create({
         property: property._id,
         employee: resolvedEmployeeId,
@@ -853,19 +883,6 @@ exports.propertyCheckInOutByBarcode = async (req, res) => {
         success: true,
         message: "Property check-in saved",
         data: created,
-      });
-    }
-
-    const openLog = await PropertyCheckLog.findOne({
-      property: property._id,
-      employee: resolvedEmployeeId,
-      $or: [{ checkOut: { $exists: false } }, { checkOut: null }],
-    }).sort({ checkIn: -1 });
-
-    if (!openLog) {
-      return res.status(404).json({
-        success: false,
-        message: "No open check-in found for checkout",
       });
     }
 

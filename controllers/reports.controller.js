@@ -14,6 +14,7 @@ const EmployeeClockLog = require("../models/reports/employeeClockLog.model");
 const Property = require("../models/properties/property.model");
 const PropertyCheckLog = require("../models/reports/propertyCheckLog.model");
 const QrScanLog = require("../models/properties/qrScanLog.model");
+const BinTag = require("../models/properties/binTag.model");
 
 const resolvePropertyIdsForReport = async (req) => {
   if (req.userType === "EMPLOYEE") {
@@ -55,40 +56,86 @@ exports.serviceRouteSummary = async (req, res) => {
     const limit = Math.max(parseInt(req.query.limit) || 10, 1);
     const skip = (page - 1) * limit;
 
-    const dayStart = new Date(`${date}T00:00:00`);
-    const dayEnd = new Date(`${date}T23:59:59`);
+    if (!date || !propertyId || !mongoose.Types.ObjectId.isValid(propertyId)) {
+      return res.json({
+        page,
+        limit,
+        totalRecords: 0,
+        totalPages: 0,
+        data: [],
+      });
+    }
 
-    const routes = await ServiceRoute.find({ property: propertyId })
-      .populate("checkpoints")
+    const allowedPropertyIds = await resolvePropertyIdsForReport(req);
+    if (
+      Array.isArray(allowedPropertyIds) &&
+      allowedPropertyIds.length &&
+      !allowedPropertyIds.some((id) => id.toString() === propertyId)
+    ) {
+      return res.json({
+        page,
+        limit,
+        totalRecords: 0,
+        totalPages: 0,
+        data: [],
+      });
+    }
+
+    const dayStart = new Date(`${date}T00:00:00.000Z`);
+    const dayEnd = new Date(`${date}T23:59:59.999Z`);
+
+    const binTagMatch = {
+      property: new mongoose.Types.ObjectId(propertyId),
+      type: "Route Checkpoint",
+      isDeleted: false,
+    };
+
+    const totalRoutes = await BinTag.countDocuments(binTagMatch);
+
+    const binTags = await BinTag.find(binTagMatch)
+      .sort({ unitNumber: 1 })
       .skip(skip)
       .limit(limit)
       .lean();
 
-    const totalRoutes = await ServiceRoute.countDocuments({
-      property: propertyId,
-    });
+    const binTagIds = binTags.map((b) => b._id);
+    const scanAgg = binTagIds.length
+      ? await QrScanLog.aggregate([
+          {
+            $match: {
+              binTag: { $in: binTagIds },
+              scannedAt: { $gte: dayStart, $lte: dayEnd },
+            },
+          },
+          {
+            $group: {
+              _id: "$binTag",
+              scanCount: { $sum: 1 },
+              firstScan: { $min: "$scannedAt" },
+              lastScan: { $max: "$scannedAt" },
+            },
+          },
+        ])
+      : [];
 
-    const scans = await ScanEvent.aggregate([
-      {
-        $match: {
-          property: new mongoose.Types.ObjectId(propertyId),
-          scannedAt: { $gte: dayStart, $lte: dayEnd },
-        },
-      },
-      { $group: { _id: "$checkpoint" } },
-    ]);
+    const scanMap = new Map(
+      scanAgg.map((s) => [s._id.toString(), s])
+    );
 
-    const scannedCheckpointIds = scans.map((s) => s._id.toString());
-
-    const data = routes.map((route) => {
-      const scannedCount = route.checkpoints.filter((cp) =>
-        scannedCheckpointIds.includes(cp._id.toString())
-      ).length;
-
+    const data = binTags.map((tag) => {
+      const scan = scanMap.get(tag._id.toString());
       return {
-        routeName: route.routeName,
-        totalCheckpoints: route.checkpoints.length,
-        checkpointsScanned: scannedCount,
+        routeName: tag.unitNumber,
+        propertyName: tag.propertySnapshot?.propertyName || null,
+        barcodeId: tag.barcode,
+        routeCheckpoint: tag.qrCodeImage || null,
+        totalCheckpoints: 1,
+        checkpointsScanned: scan ? 1 : 0,
+        scanCount: scan?.scanCount || 0,
+        checkIn: scan?.firstScan || null,
+        checkOut: scan?.lastScan || null,
+        createdAt: tag.createdAt,
+        updatedAt: tag.updatedAt,
       };
     });
 
@@ -324,6 +371,10 @@ exports.checkInOutHistoricalReport = async (req, res) => {
               },
             },
           },
+        },
+      },
+      {
+        $addFields: {
           employeeNameResolved: {
             $cond: [
               { $ne: [{ $ifNull: ["$employeeName", ""] }, ""] },
@@ -436,6 +487,7 @@ exports.checkInOutHistoricalReport = async (req, res) => {
       }
 
       qrPipeline.push(
+        { $sort: { scannedAt: -1, createdAt: -1 } },
         {
           $group: {
             _id: {
@@ -450,6 +502,7 @@ exports.checkInOutHistoricalReport = async (req, res) => {
             scanCount: { $sum: 1 },
             createdAt: { $min: "$createdAt" },
             updatedAt: { $max: "$updatedAt" },
+            scannedBySnapshot: { $first: "$scannedBySnapshot" },
           },
         },
         {
@@ -605,12 +658,51 @@ exports.checkInOutHistoricalReport = async (req, res) => {
                 },
               },
             },
+            scannedBySnapshotName: {
+              $let: {
+                vars: {
+                  fullName: {
+                    $trim: {
+                      input: {
+                        $concat: [
+                          { $ifNull: ["$scannedBySnapshot.firstName", ""] },
+                          " ",
+                          { $ifNull: ["$scannedBySnapshot.lastName", ""] },
+                        ],
+                      },
+                    },
+                  },
+                },
+                in: {
+                  $ifNull: [
+                    {
+                      $cond: [
+                        { $ne: ["$$fullName", ""] },
+                        "$$fullName",
+                        {
+                          $ifNull: [
+                            "$scannedBySnapshot.username",
+                            "$scannedBySnapshot.email",
+                          ],
+                        },
+                      ],
+                    },
+                    "",
+                  ],
+                },
+              },
+            },
+          },
+        },
+        {
+          $addFields: {
             employeeNameResolved: {
               $let: {
                 vars: {
                   e: { $ifNull: ["$employeeName", ""] },
                   u: { $ifNull: ["$userName", ""] },
                   m: { $ifNull: ["$managerName", ""] },
+                  s: { $ifNull: ["$scannedBySnapshotName", ""] },
                 },
                 in: {
                   $cond: [
@@ -624,7 +716,13 @@ exports.checkInOutHistoricalReport = async (req, res) => {
                           $cond: [
                             { $ne: ["$$m", ""] },
                             "$$m",
-                            "Unknown Employee",
+                            {
+                              $cond: [
+                                { $ne: ["$$s", ""] },
+                                "$$s",
+                                "Unknown Employee",
+                              ],
+                            },
                           ],
                         },
                       ],

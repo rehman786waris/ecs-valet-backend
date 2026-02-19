@@ -41,6 +41,7 @@ router.post(
   propertyController.propertyCheckInOutByBarcode
 );
 
+// Update unit status
 // Update property
 router.put(
   "/:id",

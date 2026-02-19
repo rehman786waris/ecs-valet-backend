@@ -28,6 +28,19 @@ const buildingSchema = new mongoose.Schema(
           trim: true,
           required: true,
         },
+        status: {
+          type: Boolean,
+          default: false,
+          index: true,
+        },
+        checkIn: {
+          type: Date,
+          default: null,
+        },
+        checkOut: {
+          type: Date,
+          default: null,
+        },
       },
     ],
 
