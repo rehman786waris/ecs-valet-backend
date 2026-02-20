@@ -34,6 +34,7 @@ const binTagSchema = new mongoose.Schema(
       name: { type: String, trim: true },
       order: { type: Number },
       address: { type: String, trim: true },
+      floor: { type: String, trim: true },
     },
 
     /* ======================

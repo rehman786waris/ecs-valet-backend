@@ -56,6 +56,13 @@ router.put(
 // Toggle active/inactive
 router.patch("/:id/status", adminAuth, propertyController.togglePropertyStatus);
 
+// Update building floor
+router.patch(
+  "/buildings/:id/floor",
+  adminManagerEmployeeAuth,
+  propertyController.updateBuildingFloor
+);
+
 // Soft delete property
 router.delete("/:id", adminAuth, propertyController.deleteProperty);
 

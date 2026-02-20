@@ -33,6 +33,22 @@ const qrScanLogSchema = new mongoose.Schema(
       index: true,
     },
 
+    activityType: {
+      type: String,
+      enum: [
+        "Recycle/Waste Collection Done",
+        "Violation Reported",
+        "Rollback Activities",
+        "Note Added",
+        "Walk Through Done",
+        "Route Check Point",
+        "Redundant Route Service",
+        "Route Checkpoint",
+        "Recycle",
+        "Task Completed",
+      ],
+    },
+
     location: {
       lat: Number,
       lng: Number,

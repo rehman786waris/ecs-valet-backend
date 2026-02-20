@@ -15,6 +15,12 @@ const buildingSchema = new mongoose.Schema(
       trim: true,
     },
 
+    floor: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     numberOfUnits: {
       type: Number,
       required: true,

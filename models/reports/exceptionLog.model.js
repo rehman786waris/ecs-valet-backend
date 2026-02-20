@@ -36,9 +36,10 @@ const exceptionLogSchema = new mongoose.Schema(
     },
 
     // 🔒 snapshot for historical accuracy
+    // keep flexible to avoid validation errors when snapshot shape evolves
     propertySnapshot: {
-      address: String,
-      type: String,
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
 
     status: {

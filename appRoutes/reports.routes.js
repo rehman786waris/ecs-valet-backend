@@ -36,6 +36,21 @@ router.get(
   requireMiddleware("adminAuth", adminAuth),
   requireController("serviceReport")
 );
+router.patch(
+  "/service-activities/:id/activity-type",
+  requireMiddleware("adminAuth", adminAuth),
+  requireController("updateServiceActivityType")
+);
+router.get(
+  "/service-activities/:id",
+  requireMiddleware("adminAuth", adminAuth),
+  requireController("getServiceActivityById")
+);
+router.get(
+  "/debug-db",
+  requireMiddleware("adminAuth", adminAuth),
+  requireController("debugDbInfo")
+);
 router.get(
   "/property-checkin-checkout",
   requireMiddleware("adminManagerEmployeeAuth", adminManagerEmployeeAuth),

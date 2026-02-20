@@ -15,6 +15,7 @@ const Property = require("../models/properties/property.model");
 const PropertyCheckLog = require("../models/reports/propertyCheckLog.model");
 const QrScanLog = require("../models/properties/qrScanLog.model");
 const BinTag = require("../models/properties/binTag.model");
+const Alert = require("../models/alerts/alert.model");
 
 const resolvePropertyIdsForReport = async (req) => {
   if (req.userType === "EMPLOYEE") {
@@ -127,6 +128,7 @@ exports.serviceRouteSummary = async (req, res) => {
       return {
         routeName: tag.unitNumber,
         propertyName: tag.propertySnapshot?.propertyName || null,
+        buildingName: tag.building?.name || null,
         barcodeId: tag.barcode,
         routeCheckpoint: tag.qrCodeImage || null,
         totalCheckpoints: 1,
@@ -171,26 +173,64 @@ exports.missedRouteCheckpoints = async (req, res) => {
       scannedAt: { $gte: dayStart, $lte: dayEnd },
     });
 
-    const totalMissed = await Checkpoint.countDocuments({
+    let totalMissed = await Checkpoint.countDocuments({
       property: propertyId,
       _id: { $nin: scanned },
     });
 
-    const missed = await Checkpoint.find({
-      property: propertyId,
-      _id: { $nin: scanned },
-    })
-      .populate("property")
-      .populate("building")
-      .skip(skip)
-      .limit(limit);
+    let data = [];
 
-    const data = missed.map((c) => ({
-      property: c.property.name,
-      building: c.building.name,
-      barcodeId: c.barcodeId,
-      address: c.property.address,
-    }));
+    if (totalMissed > 0) {
+      const missed = await Checkpoint.find({
+        property: propertyId,
+        _id: { $nin: scanned },
+      })
+        .populate("property")
+        .populate("building")
+        .skip(skip)
+        .limit(limit);
+
+      data = missed.map((c) => ({
+        property: c.property.name,
+        building: c.building.name,
+        barcodeId: c.barcodeId,
+        address: c.property.address,
+      }));
+    } else {
+      // Fallback to QrScanLog + Route Checkpoint bin tags
+      const binTagMatch = {
+        property: new mongoose.Types.ObjectId(propertyId),
+        type: "Route Checkpoint",
+        isDeleted: false,
+      };
+
+      const allRouteTags = await BinTag.find(binTagMatch).select(
+        "_id barcode building propertySnapshot createdAt updatedAt"
+      );
+
+      const tagIds = allRouteTags.map((t) => t._id);
+      const scannedTags = tagIds.length
+        ? await QrScanLog.distinct("binTag", {
+            binTag: { $in: tagIds },
+            scannedAt: { $gte: dayStart, $lte: dayEnd },
+          })
+        : [];
+
+      const scannedSet = new Set(scannedTags.map((id) => id.toString()));
+      const missedTags = allRouteTags.filter(
+        (t) => !scannedSet.has(t._id.toString())
+      );
+
+      totalMissed = missedTags.length;
+      data = missedTags.slice(skip, skip + limit).map((t) => ({
+        property: t.propertySnapshot?.propertyName || null,
+        building: t.building?.name || null,
+        barcodeId: t.barcode || null,
+        address: t.propertySnapshot?.address || null,
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+      }));
+    }
 
     res.json({
       page,
@@ -1087,10 +1127,15 @@ exports.serviceReport = async (req, res) => {
               },
             },
             activity: {
-              $cond: [
-                { $eq: ["$binTag.type", "Route Checkpoint"] },
-                "Route Check Point",
-                "Violation Reported",
+              $ifNull: [
+                "$activityType",
+                {
+                  $cond: [
+                    { $eq: ["$binTag.type", "Route Checkpoint"] },
+                    "Route Check Point",
+                    "Violation Reported",
+                  ],
+                },
               ],
             },
           },
@@ -1159,8 +1204,9 @@ exports.serviceReport = async (req, res) => {
         { $limit: Number(limit) },
         {
           $project: {
-            _id: 0,
+            _id: "$_id",
             property: "$property.propertyName",
+            propertyAddress: "$property.address",
             buildingName: "$binTag.building.name",
             unit: { $ifNull: ["$binTag.unitNumber", "$snapshot.unitNumber"] },
             scanDate: "$scannedAt",
@@ -1187,8 +1233,9 @@ exports.serviceReport = async (req, res) => {
       { $limit: Number(limit) },
       {
         $project: {
-          _id: 0,
+          _id: "$_id",
           property: "$property.propertyName",
+          propertyAddress: "$property.address",
           buildingName: "$building.name",
           unit: "$checkpoint.name",
           scanDate: "$scannedAt",
@@ -1207,6 +1254,122 @@ exports.serviceReport = async (req, res) => {
       totalRecords,
       totalPages: Math.ceil(totalRecords / limit),
       data,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/* ===============================
+   UPDATE SERVICE ACTIVITY TYPE (ScanEvent)
+================================ */
+exports.updateServiceActivityType = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { activityType } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid id" });
+    }
+
+    const nextActivity = typeof activityType === "string" ? activityType.trim() : "";
+    if (!nextActivity) {
+      return res.status(400).json({ message: "activityType is required" });
+    }
+
+    const allowed = ScanEvent.schema.path("activityType")?.enumValues || [];
+    if (!allowed.includes(nextActivity)) {
+      return res.status(400).json({
+        message: `Invalid activityType. Allowed: ${allowed.join(", ")}`,
+      });
+    }
+
+    const updated = await ScanEvent.findByIdAndUpdate(
+      id,
+      { activityType: nextActivity },
+      { new: true }
+    );
+
+    if (updated) {
+      return res.json({ success: true, data: updated });
+    }
+
+    // Fallback for legacy records where _id may have been stored as a string
+    const raw = await ScanEvent.collection.findOneAndUpdate(
+      { _id: id },
+      { $set: { activityType: nextActivity } },
+      { returnDocument: "after" }
+    );
+    if (raw?.value) {
+      return res.json({ success: true, data: raw.value });
+    }
+
+    // Try QrScanLog (for QR-based report rows)
+    const qrUpdated = await QrScanLog.findByIdAndUpdate(
+      id,
+      { activityType: nextActivity },
+      { new: true }
+    );
+    if (qrUpdated) {
+      return res.json({ success: true, data: qrUpdated });
+    }
+
+    const qrRaw = await QrScanLog.collection.findOneAndUpdate(
+      { _id: id },
+      { $set: { activityType: nextActivity } },
+      { returnDocument: "after" }
+    );
+    if (qrRaw?.value) {
+      return res.json({ success: true, data: qrRaw.value });
+    }
+
+    return res.status(404).json({ message: "ScanEvent not found" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/* ===============================
+   DEBUG SERVICE ACTIVITY (ScanEvent)
+================================ */
+exports.getServiceActivityById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({ message: "Invalid id" });
+    }
+
+    const byObjectId = mongoose.Types.ObjectId.isValid(id)
+      ? await ScanEvent.findById(id)
+      : null;
+    const byRaw = await ScanEvent.collection.findOne({ _id: id });
+
+    return res.json({
+      success: true,
+      foundByObjectId: Boolean(byObjectId),
+      foundByRawStringId: Boolean(byRaw),
+      collection: ScanEvent.collection?.name,
+      database: ScanEvent.db?.name,
+      data: byObjectId || byRaw || null,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/* ===============================
+   DEBUG DB INFO
+================================ */
+exports.debugDbInfo = async (req, res) => {
+  try {
+    const conn = mongoose.connection;
+    res.json({
+      success: true,
+      readyState: conn.readyState,
+      database: conn.name,
+      host: conn.host,
+      port: conn.port,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -1358,7 +1521,7 @@ exports.propertyCheckInOutLog = async (req, res) => {
       { $unwind: "$property" },
     ];
 
-    const totalRecords =
+    let totalRecords =
       (
         await ScanEvent.aggregate([
           ...basePipeline,
@@ -1366,24 +1529,105 @@ exports.propertyCheckInOutLog = async (req, res) => {
         ])
       )[0]?.count || 0;
 
-    const data = await ScanEvent.aggregate([
-      ...basePipeline,
-      { $sort: { checkIn: -1 } },
-      { $skip: Number(skip) },
-      { $limit: Number(limit) },
-      {
-        $project: {
-          _id: 0,
-          name: "$property.name",
-          propertyDetail: {
-            address: "$property.address",
-            type: "$property.type",
+    let data = [];
+
+    if (totalRecords > 0) {
+      data = await ScanEvent.aggregate([
+        ...basePipeline,
+        { $sort: { checkIn: -1 } },
+        { $skip: Number(skip) },
+        { $limit: Number(limit) },
+        {
+          $project: {
+            _id: 0,
+            name: "$property.propertyName",
+            propertyDetail: {
+              address: "$property.address",
+              type: "$property.propertyType",
+            },
+            checkIn: 1,
+            checkOut: 1,
           },
-          checkIn: 1,
-          checkOut: 1,
         },
-      },
-    ]);
+      ]);
+    } else {
+      const qrMatch = {};
+      if (match.scannedAt) qrMatch.scannedAt = match.scannedAt;
+
+      const qrPipeline = [
+        { $match: qrMatch },
+        {
+          $lookup: {
+            from: "bintags",
+            localField: "binTag",
+            foreignField: "_id",
+            as: "binTag",
+          },
+        },
+        { $unwind: "$binTag" },
+        {
+          $lookup: {
+            from: "properties",
+            localField: "binTag.property",
+            foreignField: "_id",
+            as: "property",
+          },
+        },
+        { $unwind: "$property" },
+      ];
+
+      if (propertyId) {
+        qrPipeline.push({
+          $match: { "property._id": new mongoose.Types.ObjectId(propertyId) },
+        });
+      }
+
+      qrPipeline.push(
+        {
+          $group: {
+            _id: {
+              property: "$property._id",
+              date: {
+                $dateToString: {
+                  format: "%Y-%m-%d",
+                  date: "$scannedAt",
+                },
+              },
+            },
+            checkIn: { $min: "$scannedAt" },
+            checkOut: { $max: "$scannedAt" },
+            property: { $first: "$property" },
+          },
+        }
+      );
+
+      totalRecords =
+        (
+          await QrScanLog.aggregate([
+            ...qrPipeline,
+            { $count: "count" },
+          ])
+        )[0]?.count || 0;
+
+      data = await QrScanLog.aggregate([
+        ...qrPipeline,
+        { $sort: { checkIn: -1 } },
+        { $skip: Number(skip) },
+        { $limit: Number(limit) },
+        {
+          $project: {
+            _id: 0,
+            name: "$property.propertyName",
+            propertyDetail: {
+              address: "$property.address",
+              type: "$property.propertyType",
+            },
+            checkIn: 1,
+            checkOut: 1,
+          },
+        },
+      ]);
+    }
 
     res.json({
       page: Number(page),
@@ -1413,7 +1657,7 @@ exports.serviceAlertsLog = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    const match = { isActive: true };
+    const match = { isActive: true, isDeleted: false };
 
     if (startDate && endDate) {
       match.createdAt = {
@@ -1422,28 +1666,54 @@ exports.serviceAlertsLog = async (req, res) => {
       };
     }
 
-    if (status) match.status = status;
+    if (status) {
+      const normalized = String(status).trim().toLowerCase();
+      if (normalized === "new" || normalized === "pending") {
+        match.sendStatus = "Pending";
+      } else if (normalized === "submitted" || normalized === "sent") {
+        match.sendStatus = "Sent";
+      } else if (normalized === "failed" || normalized === "closed") {
+        match.sendStatus = "Failed";
+      } else {
+        match.sendStatus = status;
+      }
+    }
 
     const pipeline = [
       { $match: match },
 
       {
         $lookup: {
-          from: "employees",
-          localField: "sender",
+          from: "properties",
+          localField: "properties",
+          foreignField: "_id",
+          as: "property",
+        },
+      },
+      { $unwind: { path: "$property", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "users",
+          localField: "createdBy",
           foreignField: "_id",
           as: "sender",
         },
       },
-      { $unwind: "$sender" },
+      { $unwind: { path: "$sender", preserveNullAndEmptyArrays: true } },
     ];
 
     if (search) {
+      const searchRegex = new RegExp(search, "i");
       pipeline.push({
         $match: {
           $or: [
-            { mobile: { $regex: search, $options: "i" } },
-            { "sender.name": { $regex: search, $options: "i" } },
+            { title: searchRegex },
+            { message: searchRegex },
+            { "property.propertyName": searchRegex },
+            { "sender.firstName": searchRegex },
+            { "sender.lastName": searchRegex },
+            { "sender.username": searchRegex },
+            { "sender.email": searchRegex },
           ],
         },
       });
@@ -1451,7 +1721,7 @@ exports.serviceAlertsLog = async (req, res) => {
 
     const totalRecords =
       (
-        await ServiceAlertLog.aggregate([
+        await Alert.aggregate([
           ...pipeline,
           { $count: "count" },
         ])
@@ -1464,16 +1734,31 @@ exports.serviceAlertsLog = async (req, res) => {
       {
         $project: {
           _id: 0,
-          propertyDetail: "$propertySnapshot",
-          mobile: 1,
-          sender: "$sender.name",
-          status: 1,
+          propertyDetail: {
+            propertyName: "$property.propertyName",
+            address: "$property.address",
+            type: "$property.propertyType",
+          },
+          title: 1,
+          message: 1,
+          sender: {
+            $trim: {
+              input: {
+                $concat: [
+                  { $ifNull: ["$sender.firstName", ""] },
+                  " ",
+                  { $ifNull: ["$sender.lastName", ""] },
+                ],
+              },
+            },
+          },
+          status: "$sendStatus",
           createdAt: 1,
         },
       }
     );
 
-    const data = await ServiceAlertLog.aggregate(pipeline);
+    const data = await Alert.aggregate(pipeline);
 
     res.json({
       page: Number(page),

@@ -27,9 +27,9 @@ exports.createViolation = async (req, res) => {
       binTagId,
     } = req.body;
 
-    if (!property || !user || !rule) {
+    if (!property || !rule) {
       return res.status(400).json({
-        message: "Property, user, and rule are required",
+        message: "Property and rule are required",
       });
     }
 

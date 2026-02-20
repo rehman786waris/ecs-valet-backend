@@ -26,8 +26,10 @@ exports.createExceptionLog = async (req, res) => {
       employee,
       property,
       propertySnapshot: {
-        address: prop.address,
-        type: prop.type,
+        address: prop.address
+          ? `${prop.address.street || ""} ${prop.address.city || ""} ${prop.address.state || ""} ${prop.address.zip || ""}`.trim()
+          : "",
+        type: prop.propertyType,
       },
     });
 
@@ -62,7 +64,7 @@ exports.getExceptionLogs = async (req, res) => {
 
     const logs = await ExceptionLog.find(match)
       .populate("exceptionType", "name category")
-      .populate("employee", "name")
+      .populate("employee", "firstName lastName")
       .sort({ createdAt: -1 })
       .skip(Number(skip))
       .limit(Number(limit))
@@ -77,7 +79,10 @@ exports.getExceptionLogs = async (req, res) => {
         title: log.title,
         description: log.description,
         exceptionType: log.exceptionType.name,
-        employee: log.employee.name,
+        employeeId: log.employee?._id || null,
+        employeeName: log.employee
+          ? `${log.employee.firstName || ""} ${log.employee.lastName || ""}`.trim()
+          : "Unknown",
         propertyDetail: log.propertySnapshot,
         status: log.status,
         createdAt: log.createdAt,

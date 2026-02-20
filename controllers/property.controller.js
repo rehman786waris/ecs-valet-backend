@@ -273,6 +273,7 @@ exports.createProperty = async (req, res) => {
       const building = await Building.create({
         property: property._id,
         name: b.name,
+        floor: b.floor,
         numberOfUnits,
         units,
         buildingOrder: b.buildingOrder || 0,
@@ -299,6 +300,7 @@ exports.createProperty = async (req, res) => {
             name: building.name,
             order: building.buildingOrder,
             address: building.address,
+            floor: building.floor,
           },
           unitNumber: generateUnitNumber(i, u),
           units: [{ unitNumber: generateUnitNumber(i, u) }],
@@ -552,6 +554,52 @@ exports.togglePropertyStatus = async (req, res) => {
     await property.save();
 
     res.json({ success: true, message: "Property status updated" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* =====================================================
+   UPDATE BUILDING FLOOR
+===================================================== */
+exports.updateBuildingFloor = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { floor } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid building id" });
+    }
+
+    if (floor === undefined) {
+      return res
+        .status(400)
+        .json({ success: false, message: "floor is required" });
+    }
+
+    const building = await Building.findById(id);
+    if (!building) {
+      return res.status(404).json({ success: false, message: "Building not found" });
+    }
+
+    const propertyAccessQuery = await buildPropertyAccessQuery({
+      ...req,
+      params: { id: building.property },
+    });
+    const property = await Property.findOne(propertyAccessQuery).select("_id");
+    if (!property) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    building.floor = typeof floor === "string" ? floor.trim() : String(floor);
+    await building.save();
+
+    await BinTag.updateMany(
+      { property: building.property, "building.name": building.name },
+      { $set: { "building.floor": building.floor } }
+    );
+
+    res.json({ success: true, message: "Building floor updated", data: building });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

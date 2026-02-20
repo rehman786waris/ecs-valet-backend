@@ -24,8 +24,14 @@ const serviceActivitySchema = new mongoose.Schema(
     activityType: {
       type: String,
       enum: [
-        "Route Checkpoint",
+        "Recycle/Waste Collection Done",
         "Violation Reported",
+        "Rollback Activities",
+        "Note Added",
+        "Walk Through Done",
+        "Route Check Point",
+        "Redundant Route Service",
+        "Route Checkpoint",
         "Recycle",
         "Task Completed",
       ],
